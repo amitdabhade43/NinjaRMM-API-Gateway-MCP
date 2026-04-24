@@ -22,8 +22,14 @@ env/
 # Logs
 *.log
 
-# Fast Memory database (user-specific, created at runtime)
-api_gateway/fast_memory_ninjaone.db
+# Fast Memory (user-specific, created at runtime)
+.ninja-mcp/
+fast_memory.json
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 
 # OS files
 .DS_Store

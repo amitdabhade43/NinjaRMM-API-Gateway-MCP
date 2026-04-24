@@ -1,0 +1,35 @@
+[project]
+name = "ninja-mcp"
+version = "0.2.0"
+description = "NinjaOne RMM API Gateway MCP Server"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "jasondsmith72" }]
+dependencies = [
+    "mcp>=1.3.0",
+    "httpx>=0.28.0",
+    "rapidfuzz>=3.6",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "respx>=0.22",
+]
+
+[project.scripts]
+ninja-mcp = "ninja_mcp.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ninja_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

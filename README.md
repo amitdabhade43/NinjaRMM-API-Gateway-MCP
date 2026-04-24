@@ -1,47 +1,42 @@
 # NinjaRMM API Gateway MCP Server
 
-A Model Context Protocol (MCP) server that provides full access to the NinjaOne (Ninja RMM) API v2 through Claude Code. Uses a database-backed gateway pattern for 100% API coverage with 306 endpoints across 26 categories.
+Model Context Protocol server giving Claude full access to the NinjaOne (Ninja RMM) API v2 — all **306 endpoints across 26 categories** — through a small set of discovery + execution tools.
 
-## Features
+## Design
 
-- **Full API Coverage**: All 306 NinjaOne API v2 endpoints indexed in a searchable SQLite database
-- **Smart Discovery**: Search endpoints by keyword, natural language, or browse by category
-- **Fast Memory**: Save and reuse frequently-used API queries
-- **OAuth2 Authentication**: Automatic token management with client credentials flow
-- **Raw Request Support**: Send raw API requests in `METHOD /path` format
+- **Zero-build gateway.** The OpenAPI spec (`NinjaRMM-API-v2.json`) is loaded into memory at startup. No SQLite, no index build step — update the spec and restart.
+- **7 focused tools** (not 306). Claude finds endpoints by fuzzy search, then calls them through a single `call` tool.
+- **Async HTTP with connection pooling.** One `httpx.AsyncClient` per process; OAuth2 token cached in memory and refreshed ~60s before expiry.
+- **Response protection.** Large payloads (NinjaOne device lists, etc.) are truncated before reaching the model context.
+- **Structured output.** Tools return dicts, not stringified JSON.
 
 ## Setup
 
-### 1. Create NinjaOne API Credentials
+### 1. NinjaOne API credentials
 
-1. Log into NinjaOne (app.ninjarmm.com)
-2. Go to **Administration > Apps > API**
-3. Create a new API application with **Client Credentials** grant type
-4. Enable scopes: `monitoring`, `management`, `control`
-5. Save the **Client ID** and **Client Secret**
+In NinjaOne → **Administration → Apps → API**, create a new application with:
 
-### 2. Install Dependencies
+- Grant type: **Client Credentials**
+- Scopes: `monitoring`, `management`, `control`
 
-```bash
-pip install -r requirements.txt
-```
+Save the Client ID and Client Secret.
 
-### 3. Build the API Database (if not already built)
+### 2. Install
 
 ```bash
-python build_database.py
+pip install -e .
 ```
 
-### 4. Configure Claude Code
+### 3. Configure Claude
 
-Add to your Claude Code MCP settings:
+Add to your MCP client config:
 
 ```json
 {
   "mcpServers": {
     "NinjaRMM-API-Gateway-MCP": {
       "command": "python",
-      "args": ["C:/Users/jd656/NinjaRMM-API-Gateway-MCP/ninjaone_api_gateway_server.py"],
+      "args": ["-m", "ninja_mcp"],
       "env": {
         "NINJAONE_CLIENT_ID": "your-client-id",
         "NINJAONE_CLIENT_SECRET": "your-client-secret",
@@ -52,42 +47,44 @@ Add to your Claude Code MCP settings:
 }
 ```
 
-## Available Tools
+## Tools
 
-| Tool | Description |
-|------|-------------|
-| `search_api_endpoints` | Full-text search across all API endpoints |
-| `get_api_endpoint_details` | Get detailed info for a specific endpoint (params, schemas, responses) |
-| `execute_api_call` | Execute an API call with automatic Fast Memory integration |
-| `natural_language_api_search` | Search endpoints using natural language |
-| `list_api_categories` | List all 26 API categories |
-| `get_category_endpoints` | Browse endpoints within a category |
-| `send_raw_api_request` | Send raw requests (e.g., `GET /v2/devices`) |
-| `save_to_fast_memory` | Save a query for quick reuse |
-| `list_fast_memory` | List saved queries |
-| `delete_from_fast_memory` | Delete a saved query |
-| `clear_fast_memory` | Clear all saved queries |
+| Tool | Purpose |
+|---|---|
+| `find_endpoint` | Fuzzy search endpoints. Filters: `query`, `category`, `method`. No args → list categories. |
+| `describe_endpoint` | Full details (parameters, request body, responses) for one endpoint. |
+| `call` | Execute a call. Pass `endpoint: "METHOD /path"`, `path_params`, `query`, `body`. |
+| `raw_call` | Quick-form execution: `raw_call("GET /v2/devices?df=class eq 'WINDOWS_WORKSTATION'")`. |
+| `memory_save` | Save a reusable call with a name; returns an `id`. |
+| `memory_list` | List saved calls. |
+| `memory_delete` | Delete by `id`, or `"*"` to clear all. |
 
-## API Categories
-
-System, Management, Queries, Devices, Knowledge Base Articles, Custom Tabs, Ticketing, Organization Checklists, Organization Documents, Related Items, Custom Fields, Document Templates, Asset Tags, Organizations, Checklist Templates, Software Licenses, Unmanaged Devices, Backup, Node Roles, Users, Vulnerability Management, Location, Webhooks, Groups, Billing, Asset Relationships
-
-## Environment Variables
+## Environment variables
 
 | Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `NINJAONE_CLIENT_ID` | Yes | - | OAuth2 Client ID |
-| `NINJAONE_CLIENT_SECRET` | Yes | - | OAuth2 Client Secret |
-| `NINJAONE_INSTANCE` | No | `app.ninjarmm.com` | Regional instance URL |
+|---|---|---|---|
+| `NINJAONE_CLIENT_ID` | yes | — | OAuth2 Client ID |
+| `NINJAONE_CLIENT_SECRET` | yes | — | OAuth2 Client Secret |
+| `NINJAONE_INSTANCE` | no | `app.ninjarmm.com` | Regional instance (`eu.ninjarmm.com`, `ca.ninjarmm.com`, `oc.ninjarmm.com`) |
+| `NINJA_MCP_SPEC` | no | bundled | Override path to OpenAPI JSON |
+| `NINJA_MCP_HOME` | no | `~/.ninja-mcp` | Directory for persistent fast-memory store |
+| `NINJA_MCP_LOG_LEVEL` | no | `INFO` | Python logging level (stderr only) |
 
-## Rebuilding the Database
-
-If the NinjaOne API spec is updated, download the new spec and rebuild:
+## Updating the API spec
 
 ```bash
-# Download updated spec
 curl -o NinjaRMM-API-v2.json https://app.ninjarmm.com/apidocs/NinjaRMM-API-v2.json
-
-# Rebuild database
-python build_database.py
 ```
+
+Restart the server; changes are picked up on startup — no rebuild required.
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+## Categories
+
+System, Management, Queries, Devices, Knowledge Base Articles, Custom Tabs, Ticketing, Organization Checklists, Organization Documents, Related Items, Custom Fields, Document Templates, Asset Tags, Organizations, Checklist Templates, Software Licenses, Unmanaged Devices, Backup, Node Roles, Users, Vulnerability Management, Location, Webhooks, Groups, Billing, Asset Relationships.
