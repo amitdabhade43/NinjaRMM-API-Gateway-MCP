@@ -1,10 +1,10 @@
 # NinjaRMM API Gateway MCP Server
 
-A Model Context Protocol (MCP) server that provides full access to the NinjaOne (Ninja RMM) API v2 through Claude Code. Uses a database-backed gateway pattern for 100% API coverage with 266 endpoints across 24 categories.
+A Model Context Protocol (MCP) server that provides full access to the NinjaOne (Ninja RMM) API v2 through Claude Code. Uses a database-backed gateway pattern for 100% API coverage with 306 endpoints across 26 categories.
 
 ## Features
 
-- **Full API Coverage**: All 266 NinjaOne API v2 endpoints indexed in a searchable SQLite database
+- **Full API Coverage**: All 306 NinjaOne API v2 endpoints indexed in a searchable SQLite database
 - **Smart Discovery**: Search endpoints by keyword, natural language, or browse by category
 - **Fast Memory**: Save and reuse frequently-used API queries
 - **OAuth2 Authentication**: Automatic token management with client credentials flow
@@ -60,7 +60,7 @@ Add to your Claude Code MCP settings:
 | `get_api_endpoint_details` | Get detailed info for a specific endpoint (params, schemas, responses) |
 | `execute_api_call` | Execute an API call with automatic Fast Memory integration |
 | `natural_language_api_search` | Search endpoints using natural language |
-| `list_api_categories` | List all 24 API categories |
+| `list_api_categories` | List all 26 API categories |
 | `get_category_endpoints` | Browse endpoints within a category |
 | `send_raw_api_request` | Send raw requests (e.g., `GET /v2/devices`) |
 | `save_to_fast_memory` | Save a query for quick reuse |
@@ -70,7 +70,7 @@ Add to your Claude Code MCP settings:
 
 ## API Categories
 
-System, Management, Queries, Devices, Knowledge Base Articles, Custom Tabs, Ticketing, Organization Checklists, Organization Documents, Related Items, Custom Fields, Document Templates, Asset Tags, Organizations, Checklist Templates, Software Licenses, Unmanaged Devices, Backup, Node Roles, Users, Vulnerability Management, Location, Webhooks, Groups
+System, Management, Queries, Devices, Knowledge Base Articles, Custom Tabs, Ticketing, Organization Checklists, Organization Documents, Related Items, Custom Fields, Document Templates, Asset Tags, Organizations, Checklist Templates, Software Licenses, Unmanaged Devices, Backup, Node Roles, Users, Vulnerability Management, Location, Webhooks, Groups, Billing, Asset Relationships
 
 ## Environment Variables
 
