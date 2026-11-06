@@ -88,7 +88,6 @@ def _match_template(method:str, concrete_path:str)->tuple[str,dict[str,str]]|Non
     for endpoint in _spec().endpoints:
         if endpoint.method!=method: continue
         names=PATH_PARAM_RE.findall(endpoint.path)
-        pattern="^"+PATH_PARAM_RE.sub(lambda m:"([^/]+)",re.escape(endpoint.path).replace(r"\{", "{").replace(r"\}", "}"))+"$"
         # Build safely by escaping literal path segments.
         pieces=[]; cursor=0
         for match in PATH_PARAM_RE.finditer(endpoint.path):
@@ -266,6 +265,10 @@ async def _shutdown()->None:
 def main()->None:
     log.info("Starting NinjaOne API Gateway MCP; spec=%s",_spec_path())
     _spec()
-    try:\n        mcp.run(transport="stdio")\n    finally:\n        if _CLIENT is not None:\n            asyncio.run(_shutdown())
+    try:
+        mcp.run(transport="stdio")
+    finally:
+        if _CLIENT is not None:
+            asyncio.run(_shutdown())
 
 if __name__=="__main__":main()
