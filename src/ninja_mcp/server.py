@@ -5,10 +5,10 @@ discover_endpoints, inspect_endpoint, execute_endpoint, execute_raw_request.
 DELETE is never exposed or executed. Write calls require an external human approval token.
 """
 from __future__ import annotations
-import logging, os, re, sys
+import asyncio, logging, os, re, sys
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, quote, urlsplit
+from urllib.parse import parse_qsl, quote, unquote, urlsplit
 
 from mcp.server.fastmcp import FastMCP
 from .approval import ApprovalError, verify_approval
@@ -98,7 +98,7 @@ def _match_template(method:str, concrete_path:str)->tuple[str,dict[str,str]]|Non
         pieces.append(re.escape(endpoint.path[cursor:]))
         match=re.fullmatch("".join(pieces),concrete_path)
         if match:
-            return endpoint.key,{name:__import__("urllib.parse",fromlist=["unquote"]).unquote(value)
+            return endpoint.key,{name:unquote(value)
                                  for name,value in zip(names,match.groups())}
     return None
 
@@ -208,6 +208,6 @@ async def _shutdown()->None:
 def main()->None:
     log.info("Starting NinjaOne API Gateway MCP; spec=%s",_spec_path())
     _spec()
-    mcp.run(transport="stdio")
+    try:\n        mcp.run(transport="stdio")\n    finally:\n        if _CLIENT is not None:\n            asyncio.run(_shutdown())
 
 if __name__=="__main__":main()
