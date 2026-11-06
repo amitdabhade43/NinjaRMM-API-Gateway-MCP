@@ -27,7 +27,8 @@ The token is `<base64url(payload)>.<base64url(hmac_sha256(secret, encoded_payloa
 | `discover_endpoints` | Fuzzy candidate retrieval plus optional local-LLM semantic ranking grounded in OpenAPI candidates |
 | `inspect_endpoint` | Exact parameters, required fields, request body and response schemas |
 | `execute_endpoint` | Execute a discovered endpoint using structured path/query/body arguments |
-| `execute_raw_request` | Execute a concrete method/path; extracts concrete path values into OpenAPI placeholders |\n| `execute_paginated_endpoint` | Bounded GET pagination using explicitly selected, OpenAPI-declared page and page-size parameters |
+| `execute_raw_request` | Execute a concrete method/path; extracts concrete path values into OpenAPI placeholders |
+| `execute_paginated_endpoint` | Bounded GET pagination using explicitly selected, OpenAPI-declared page and page-size parameters |
 
 Only GET/POST/PUT/PATCH operations are loaded from the specification. DELETE is excluded and separately blocked at runtime.
 
