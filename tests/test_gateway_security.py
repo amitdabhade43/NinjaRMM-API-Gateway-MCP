@@ -6,7 +6,7 @@ from ninja_mcp.server import _check_method, _interpolate_path, _match_template
 from ninja_mcp.spec import Endpoint, Spec
 
 def token(secret, method, path, body, exp=None):
-    payload={"method":method,"path":path,"body_sha256":body_digest(body),"exp":exp or int(time.time())+60}
+    payload={"method":method,"path":path,"body_sha256":body_digest(body),"exp":exp or int(time.time())+60,"jti":hashlib.sha256((method+path+str(exp)).encode()).hexdigest()}
     encoded=base64.urlsafe_b64encode(json.dumps(payload,separators=(",",":")).encode()).decode().rstrip("=")
     signature=base64.urlsafe_b64encode(hmac.new(secret.encode(),encoded.encode(),hashlib.sha256).digest()).decode().rstrip("=")
     return encoded+"."+signature
@@ -46,8 +46,8 @@ def test_approval_token_bound_to_method_path_and_body(monkeypatch):
     payload={"enabled":False}
     signed=token("unit-test-secret","PATCH","/v2/devices/123",payload)
     verify_approval(signed,"PATCH","/v2/devices/123",payload)
-    with pytest.raises(ApprovalError,match="does not match"):
-        verify_approval(signed,"PATCH","/v2/devices/123",{"enabled":True})
+    with pytest.raises(ApprovalError,match="already been used"):\n        verify_approval(signed,"PATCH","/v2/devices/123",payload)\n    signed_mismatch=token("unit-test-secret","PATCH","/v2/devices/123",{"enabled":True})\n    with pytest.raises(ApprovalError,match="does not match"):
+        verify_approval(signed_mismatch,"PATCH","/v2/devices/123",{"enabled":False})
 
 def test_approval_required_and_expiry(monkeypatch):
     monkeypatch.setenv("NINJA_MCP_APPROVAL_SECRET","unit-test-secret")
