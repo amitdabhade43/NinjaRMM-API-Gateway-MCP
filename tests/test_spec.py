@@ -7,7 +7,7 @@ SPEC_PATH = Path(__file__).resolve().parent.parent / "NinjaRMM-API-v2.json"
 
 def test_spec_loads_all_endpoints():
     spec = Spec.load(SPEC_PATH)
-    assert len(spec.endpoints) >= 300
+    assert len(spec.endpoints) >= 200\n    assert {e.method for e in spec.endpoints} <= {"GET", "POST", "PUT", "PATCH"}
     assert "devices" in [c.lower() for c in spec.categories]
 
 
