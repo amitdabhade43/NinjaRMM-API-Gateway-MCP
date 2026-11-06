@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import parse_qsl, quote, unquote, urlsplit
 
 from mcp.server.fastmcp import FastMCP
+from jsonschema import Draft202012Validator, ValidationError
 from .approval import ApprovalError, verify_approval
 from .client import NinjaAPIError, NinjaAuthError, NinjaClient
 from .search import search
@@ -71,18 +72,63 @@ def _interpolate_path(path:str, values:dict[str,Any]|None)->str:
         return quote(str(value),safe="")
     return PATH_PARAM_RE.sub(replace,path)
 
-def _validate_inputs(endpoint:Endpoint, query:dict[str,Any]|None, body:Any)->None:
-    query=query or {}
-    params=[p for p in endpoint.parameters if isinstance(p,dict)]
-    known_query={p.get("name"):p for p in params if p.get("in")=="query"}
-    unknown=set(query)-set(known_query)
+def _coerce_parameter(value: Any, schema: dict[str, Any]) -> Any:
+    kind = schema.get('type')
+    if kind == 'integer' and isinstance(value, str):
+        try: return int(value)
+        except ValueError: raise ValueError(f'Expected an integer, got {value!r}.')
+    if kind == 'number' and isinstance(value, str):
+        try: return float(value)
+        except ValueError: raise ValueError(f'Expected a number, got {value!r}.')
+    if kind == 'boolean' and isinstance(value, str):
+        if value.casefold() in {'true', '1'}: return True
+        if value.casefold() in {'false', '0'}: return False
+        raise ValueError(f'Expected a boolean, got {value!r}.')
+    if kind == 'array':
+        values = value.split(',') if isinstance(value, str) else value
+        if isinstance(values, list) and isinstance(schema.get('items'), dict):
+            return [_coerce_parameter(item, schema['items']) for item in values]
+    return value
+
+def _validate_schema(value: Any, schema: Any, label: str) -> None:
+    if not isinstance(schema, dict) or not schema: return
+    try:
+        Draft202012Validator(schema).validate(value)
+    except ValidationError as exc:
+        location = '.'.join(str(part) for part in exc.absolute_path)
+        suffix = f' at {location}' if location else ''
+        raise ValueError(f'{label}{suffix}: {exc.message}') from exc
+
+def _validate_inputs(endpoint: Endpoint, query: dict[str, Any] | None, body: Any,
+                     path_params: dict[str, Any] | None = None) -> None:
+    query = query or {}
+    path_params = path_params or {}
+    params = [p for p in endpoint.parameters if isinstance(p, dict)]
+    known_query = {p.get('name'): p for p in params if p.get('in') == 'query'}
+    unknown = set(query) - set(known_query)
     if unknown:
-        raise ValueError(f"Unknown query parameter(s): {', '.join(sorted(unknown))}. Inspect endpoint schema.")
-    for p in params:
-        if p.get("required") and p.get("in")=="query" and p.get("name") not in query:
-            raise ValueError(f"Missing required query parameter: {p.get('name')}")
-    if endpoint.request_body and endpoint.request_body.get("required") and body is None:
-        raise ValueError("This endpoint requires a JSON request body.")
+        raise ValueError(f'Unknown query parameter(s): {', '.join(sorted(unknown))}. Inspect endpoint schema.')
+    for parameter in params:
+        name, location = parameter.get('name'), parameter.get('in')
+        if parameter.get('required') and location == 'query' and name not in query:
+            raise ValueError(f'Missing required query parameter: {name}')
+        if location == 'query' and name in query:
+            schema = parameter.get('schema') or {}
+            _validate_schema(_coerce_parameter(query[name], schema), schema, f'Query parameter {name!r}')
+        if parameter.get('required') and location == 'path' and name not in path_params:
+            raise ValueError(f'Missing required path parameter: {name}')
+        if location == 'path' and name in path_params:
+            schema = parameter.get('schema') or {}
+            _validate_schema(_coerce_parameter(path_params[name], schema), schema, f'Path parameter {name!r}')
+    request_body = endpoint.request_body or {}
+    if request_body.get('required') and body is None:
+        raise ValueError('This endpoint requires a JSON request body.')
+    if body is not None and request_body:
+        content = request_body.get('content') or {}
+        media = content.get('application/json')
+        if media is None and content: media = next(iter(content.values()))
+        if isinstance(media, dict): _validate_schema(body, media.get('schema'), 'Request body')
+
 
 def _match_template(method:str, concrete_path:str)->tuple[str,dict[str,str]]|None:
     for endpoint in _spec().endpoints:
@@ -109,7 +155,7 @@ async def _execute(endpoint_key:str,*,path_params:dict[str,Any]|None=None,
     try:
         method=_check_method(endpoint.method)
         path=_interpolate_path(endpoint.path,path_params)
-        _validate_inputs(endpoint,query,body)
+        _validate_inputs(endpoint,query,body,path_params)
         if method!="GET":
             verify_approval(approval_token,method,path,body)
     except (ValueError,ApprovalError) as exc:
@@ -222,7 +268,7 @@ async def execute_paginated_endpoint(endpoint:str,path_params:dict[str,Any]|None
     if page_parameter==page_size_parameter:return {"error":"Page and page-size parameters must differ.","complete":False}
     base_query=dict(query or {})
     try:
-        _validate_inputs(found,{**base_query,page_parameter:start_page,page_size_parameter:page_size},None)
+        _validate_inputs(found,{**base_query,page_parameter:start_page,page_size_parameter:page_size},None,path_params)
     except ValueError as exc:
         return {"error":str(exc),"complete":False}
     if page_parameter in base_query or page_size_parameter in base_query:
