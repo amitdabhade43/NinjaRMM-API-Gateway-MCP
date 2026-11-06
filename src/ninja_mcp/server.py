@@ -7,6 +7,7 @@ DELETE is never exposed or executed. Write calls require an external human appro
 from __future__ import annotations
 import asyncio, logging, os, re, sys
 from pathlib import Path
+from dotenv import load_dotenv
 from typing import Any
 from urllib.parse import parse_qsl, quote, unquote, urlsplit
 
@@ -18,6 +19,10 @@ from .search import search
 from .semantic import semantic_rank
 from .spec import Endpoint, Spec
 from .truncate import truncate
+
+# Load the repository-root .env for local runs. Existing process variables take precedence.
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(_PROJECT_ROOT / ".env", override=False)
 
 logging.basicConfig(level=os.getenv("NINJA_MCP_LOG_LEVEL","INFO"), stream=sys.stderr,
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
