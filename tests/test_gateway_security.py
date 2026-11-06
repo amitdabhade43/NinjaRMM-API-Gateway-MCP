@@ -6,7 +6,7 @@ from ninja_mcp.server import _check_method, _interpolate_path, _match_template
 from ninja_mcp.spec import Endpoint, Spec
 
 def token(secret, method, path, body, exp=None):
-    payload={"method":method,"path":path,"body_sha256":body_digest(body),"exp":exp or int(time.time())+60,"jti":hashlib.sha256((method+path+str(exp)).encode()).hexdigest()}
+    payload={"method":method,"path":path,"body_sha256":body_digest(body),"exp":exp or int(time.time())+60,"jti":hashlib.sha256((method+path+body_digest(body)+str(exp)).encode()).hexdigest()}
     encoded=base64.urlsafe_b64encode(json.dumps(payload,separators=(",",":")).encode()).decode().rstrip("=")
     signature=base64.urlsafe_b64encode(hmac.new(secret.encode(),encoded.encode(),hashlib.sha256).digest()).decode().rstrip("=")
     return encoded+"."+signature
