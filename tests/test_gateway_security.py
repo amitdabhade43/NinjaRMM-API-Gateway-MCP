@@ -46,7 +46,9 @@ def test_approval_token_bound_to_method_path_and_body(monkeypatch):
     payload={"enabled":False}
     signed=token("unit-test-secret","PATCH","/v2/devices/123",payload)
     verify_approval(signed,"PATCH","/v2/devices/123",payload)
-    with pytest.raises(ApprovalError,match="already been used"):\n        verify_approval(signed,"PATCH","/v2/devices/123",payload)\n    signed_mismatch=token("unit-test-secret","PATCH","/v2/devices/123",{"enabled":True})\n    with pytest.raises(ApprovalError,match="does not match"):
+    with pytest.raises(ApprovalError,match="already been used"):
+        verify_approval(signed,"PATCH","/v2/devices/123",payload)
+    signed_mismatch=token("unit-test-secret","PATCH","/v2/devices/123",{"enabled":True})\n    with pytest.raises(ApprovalError,match="does not match"):
         verify_approval(signed_mismatch,"PATCH","/v2/devices/123",{"enabled":False})
 
 def test_approval_required_and_expiry(monkeypatch):
