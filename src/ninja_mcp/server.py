@@ -222,7 +222,7 @@ async def execute_paginated_endpoint(endpoint:str,path_params:dict[str,Any]|None
     if page_parameter==page_size_parameter:return {"error":"Page and page-size parameters must differ.","complete":False}
     base_query=dict(query or {})
     try:
-        _validate_inputs(found,base_query,None)
+        _validate_inputs(found,{**base_query,page_parameter:start_page,page_size_parameter:page_size},None)
     except ValueError as exc:
         return {"error":str(exc),"complete":False}
     if page_parameter in base_query or page_size_parameter in base_query:
