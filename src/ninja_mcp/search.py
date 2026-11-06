@@ -1,55 +1,36 @@
-"""Fuzzy search across the OpenAPI index.
-
-Scoring combines per-token substring hits (dominant signal — catches
-"reboot device" landing on `/v2/device/{id}/reboot/{mode}`) with a
-partial-ratio fuzzy fallback for typo tolerance.
-"""
-
+"""Weighted fuzzy endpoint retrieval; semantic ranking is layered on top."""
 from __future__ import annotations
-
+import re
 from rapidfuzz import fuzz
-
 from .spec import Endpoint, Spec
 
+STOP_WORDS = {"the", "a", "an", "please", "show", "me", "get", "find", "list", "all", "of", "for"}
 
-def _score(query_lower: str, query_tokens: list[str], target: str) -> float:
-    t = target.lower()
-    if query_tokens:
-        hits = sum(1 for tok in query_tokens if tok in t)
-        token_score = (hits / len(query_tokens)) * 100.0
-    else:
-        token_score = 0.0
-    fuzzy_score = max(
-        fuzz.partial_ratio(query_lower, t),
-        fuzz.token_set_ratio(query_lower, t),
-    )
-    # Heavy bias to token-presence; fuzzy only wins for typos.
-    return max(token_score, fuzzy_score * 0.75)
+def _tokens(text: str) -> list[str]:
+    return [t for t in re.findall(r"[a-z0-9]+", text.lower()) if t not in STOP_WORDS]
 
+def score_endpoint(query: str, endpoint: Endpoint) -> float:
+    q = " ".join(_tokens(query))
+    if not q:
+        return 0.0
+    path = fuzz.token_set_ratio(q, endpoint.path.replace("/", " ").replace("{", " ").replace("}", " "))
+    summary = fuzz.token_set_ratio(q, endpoint.summary)
+    description = fuzz.token_set_ratio(q, endpoint.description[:1200])
+    tags = fuzz.token_set_ratio(q, " ".join(endpoint.tags + [endpoint.category]))
+    operation = fuzz.token_set_ratio(q, endpoint.operation_id or "")
+    # Prefer explicit operation summaries and identifiers over long descriptions.
+    return round(max(path * .30 + summary * .35 + tags * .20 + operation * .15,
+                     summary * .30 + description * .25 + tags * .20 + path * .15 + operation * .10), 2)
 
-def search(
-    spec: Spec,
-    query: str = "",
-    *,
-    category: str | None = None,
-    method: str | None = None,
-    limit: int = 10,
-) -> list[Endpoint]:
+def search(spec: Spec, query: str = "", *, category: str | None = None,
+           method: str | None = None, limit: int = 20) -> list[Endpoint]:
     candidates = spec.endpoints
     if category:
-        cat_lower = category.lower()
-        candidates = [e for e in candidates if e.category.lower() == cat_lower]
+        candidates = [e for e in candidates if e.category.casefold() == category.casefold()]
     if method:
-        m = method.upper()
-        candidates = [e for e in candidates if e.method == m]
-
+        candidates = [e for e in candidates if e.method == method.upper()]
     if not query.strip():
-        return candidates[:limit]
-
-    q_lower = query.lower()
-    q_tokens = [t for t in q_lower.split() if t]
-    scored = [
-        (_score(q_lower, q_tokens, e.search_text), e) for e in candidates
-    ]
-    scored.sort(key=lambda pair: pair[0], reverse=True)
-    return [e for score, e in scored[:limit] if score > 0]
+        return candidates[:max(1, min(limit, 100))]
+    ranked = sorted(((score_endpoint(query, e), e) for e in candidates),
+                    key=lambda pair: pair[0], reverse=True)
+    return [e for score, e in ranked[:max(1, min(limit, 100))] if score >= 15]
