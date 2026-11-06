@@ -107,7 +107,7 @@ def _validate_inputs(endpoint: Endpoint, query: dict[str, Any] | None, body: Any
     known_query = {p.get('name'): p for p in params if p.get('in') == 'query'}
     unknown = set(query) - set(known_query)
     if unknown:
-        raise ValueError(f'Unknown query parameter(s): {', '.join(sorted(unknown))}. Inspect endpoint schema.')
+        raise ValueError(f"Unknown query parameter(s): {', '.join(sorted(unknown))}. Inspect endpoint schema.")
     for parameter in params:
         name, location = parameter.get('name'), parameter.get('in')
         if parameter.get('required') and location == 'query' and name not in query:
