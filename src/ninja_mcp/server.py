@@ -200,7 +200,7 @@ async def execute_raw_request(request:str,body:Any=None,approval_token:str|None=
 
 
 @mcp.tool()
-async def execute_paginated_endpoint(endpoint:str,query:dict[str,Any]|None=None,
+async def execute_paginated_endpoint(endpoint:str,path_params:dict[str,Any]|None=None,query:dict[str,Any]|None=None,
                                      page_parameter:str="page",page_size_parameter:str="pageSize",
                                      page_size:int=100,start_page:int=1,max_pages:int=10,
                                      result_path:str|None=None)->dict[str,Any]:
@@ -212,6 +212,8 @@ async def execute_paginated_endpoint(endpoint:str,query:dict[str,Any]|None=None,
     found=_spec().get(endpoint)
     if found is None:return {"error":f"Unknown endpoint {endpoint!r}","complete":False}
     if found.method!="GET":return {"error":"Automatic pagination is GET-only.","complete":False}
+    try:resolved_path=_interpolate_path(found.path,path_params)
+    except ValueError as exc:return {"error":str(exc),"complete":False}
     if not (1<=page_size<=200 and 1<=max_pages<=20 and start_page>=0):
         return {"error":"page_size must be 1-200, max_pages 1-20, and start_page non-negative.","complete":False}
     declared={p.get("name") for p in found.parameters if isinstance(p,dict) and p.get("in")=="query"}
@@ -229,7 +231,7 @@ async def execute_paginated_endpoint(endpoint:str,query:dict[str,Any]|None=None,
     try:
         for offset in range(max_pages):
             page_query={**base_query,page_parameter:start_page+offset,page_size_parameter:page_size}
-            payload=await _client().request("GET",found.path,params=page_query)
+            payload=await _client().request("GET",resolved_path,params=page_query)
             current=payload
             if result_path:
                 for segment in result_path.split("."):
