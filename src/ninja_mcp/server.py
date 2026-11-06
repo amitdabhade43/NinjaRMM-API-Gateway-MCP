@@ -199,6 +199,64 @@ async def execute_raw_request(request:str,body:Any=None,approval_token:str|None=
     return await _execute(endpoint_key,path_params=path_params,query=query or None,
                            body=body,approval_token=approval_token)
 
+
+@mcp.tool()
+async def execute_paginated_endpoint(endpoint:str,query:dict[str,Any]|None=None,
+                                     page_parameter:str="page",page_size_parameter:str="pageSize",
+                                     page_size:int=100,start_page:int=1,max_pages:int=10,
+                                     result_path:str|None=None)->dict[str,Any]:
+    """Fetch multiple GET pages using explicitly selected OpenAPI-declared page parameters.
+
+    Supply the page and page-size parameter names and optional dotted result_path (e.g. 'results').
+    Stops on a short page or max_pages; no undocumented pagination convention is guessed.
+    """
+    found=_spec().get(endpoint)
+    if found is None:return {"error":f"Unknown endpoint {endpoint!r}","complete":False}
+    if found.method!="GET":return {"error":"Automatic pagination is GET-only.","complete":False}
+    if not (1<=page_size<=200 and 1<=max_pages<=20 and start_page>=0):
+        return {"error":"page_size must be 1-200, max_pages 1-20, and start_page non-negative.","complete":False}
+    declared={p.get("name") for p in found.parameters if isinstance(p,dict) and p.get("in")=="query"}
+    if page_parameter not in declared or page_size_parameter not in declared:
+        return {"error":"Pagination parameters are not both declared by this endpoint. Inspect its OpenAPI schema.","complete":False}
+    if page_parameter==page_size_parameter:return {"error":"Page and page-size parameters must differ.","complete":False}
+    base_query=dict(query or {})
+    if page_parameter in base_query or page_size_parameter in base_query:
+        return {"error":"Pass pagination values through the dedicated arguments, not query.","complete":False}
+    items=[];pages=0;finished=False
+    try:
+        for offset in range(max_pages):
+            page_query={**base_query,page_parameter:start_page+offset,page_size_parameter:page_size}
+            payload=await _client().request("GET",found.path,params=page_query)
+            current=payload
+            if result_path:
+                for segment in result_path.split("."):
+                    if not isinstance(current,dict) or segment not in current:
+                        return {"error":f"Result path {result_path!r} was not present.",
+                                "pages_fetched":pages,"items_fetched":len(items),"complete":False}
+                    current=current[segment]
+            elif isinstance(current,dict):
+                arrays=[value for value in current.values() if isinstance(value,list)]
+                if len(arrays)==1:current=arrays[0]
+                else:return {"error":"Cannot identify the paged array safely; supply result_path.",
+                             "pages_fetched":pages,"items_fetched":len(items),"complete":False}
+            if not isinstance(current,list):
+                return {"error":"The pagination result is not an array.",
+                        "pages_fetched":pages,"items_fetched":len(items),"complete":False}
+            pages+=1;items.extend(current)
+            if len(current)<page_size:
+                finished=True;break
+    except NinjaAuthError as exc:
+        return {"error":f"Authentication failed: {exc}","pages_fetched":pages,
+                "items_fetched":len(items),"complete":False}
+    except NinjaAPIError as exc:
+        return {"error":str(exc),"status":exc.status,"body":exc.body,
+                "pages_fetched":pages,"items_fetched":len(items),"complete":False}
+    data,truncated=truncate(items)
+    return {"endpoint":endpoint,"pages_fetched":pages,"items_fetched":len(items),
+            "complete":finished and not truncated,"truncated":truncated,
+            "max_pages_reached":not finished,"data":data,
+            "note":"If complete=false, increase max_pages or narrow the query."}
+
 async def _shutdown()->None:
     global _CLIENT
     if _CLIENT is not None:
