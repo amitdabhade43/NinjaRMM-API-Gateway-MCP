@@ -27,7 +27,7 @@ The token is `<base64url(payload)>.<base64url(hmac_sha256(secret, encoded_payloa
 | `discover_endpoints` | Fuzzy candidate retrieval plus optional local-LLM semantic ranking grounded in OpenAPI candidates |
 | `inspect_endpoint` | Exact parameters, required fields, request body and response schemas |
 | `execute_endpoint` | Execute a discovered endpoint using structured path/query/body arguments |
-| `execute_raw_request` | Execute a concrete method/path; extracts concrete path values into OpenAPI placeholders |
+| `execute_raw_request` | Execute a concrete method/path; extracts concrete path values into OpenAPI placeholders |\n| `execute_paginated_endpoint` | Bounded GET pagination using explicitly selected, OpenAPI-declared page and page-size parameters |
 
 Only GET/POST/PUT/PATCH operations are loaded from the specification. DELETE is excluded and separately blocked at runtime.
 
@@ -74,7 +74,7 @@ For MCP clients using stdio, launch `python -m ninja_mcp` with the same environm
 - OpenAPI local `$ref` values are resolved, including nested schemas and parameter references. Circular/unresolved references are surfaced rather than silently treated as valid schemas.
 - Required path/query parameters and required request bodies are checked before HTTP execution.
 - Concrete raw paths are matched against OpenAPI templates and path values are URL-decoded then safely re-encoded.
-- Large responses are marked `complete: false` and include truncation metadata. The gateway does **not** guess pagination semantics. Inspect the endpoint schema and use its documented page/pageSize/cursor parameters to retrieve remaining records. Never treat a truncated response as complete.
+- Large responses are marked `complete: false` and include truncation metadata. Use `execute_paginated_endpoint` when the OpenAPI schema documents page and page-size parameters; provide their exact names and, for envelope responses, the dotted `result_path`. The tool is bounded (maximum 20 pages, 200 items per page), and reports incomplete results if the page cap or response-size cap is reached. For cursor/offset or unusual pagination, call the endpoint manually using its documented query parameters. Never treat a truncated response as complete.
 - GET requests may retry bounded transient failures and 429 responses. POST/PUT/PATCH are not automatically retried.
 
 ## Development
