@@ -15,10 +15,10 @@ A schema-driven MCP gateway for the NinjaOne REST API v2. It discovers operation
 The trusted approval service should sign the base64url-encoded UTF-8 JSON payload using HMAC-SHA256 with `NINJA_MCP_APPROVAL_SECRET`. Payload fields:
 
 ```json
-{"method":"PATCH","path":"/v2/organizations/123","body_sha256":"<sha256 of canonical JSON body>","exp":<unix-seconds>}
+{"method":"PATCH","path":"/v2/organizations/123","body_sha256":"<sha256 of canonical JSON body>","exp":<unix-seconds>,"jti":"<unique-token-id>"}
 ```
 
-The token is `<base64url(payload)>.<base64url(hmac_sha256(secret, encoded_payload))>`. Canonical body JSON uses sorted keys, compact separators and UTF-8. Tokens are single-purpose and short-lived. A production approval service should additionally authenticate the human, authorize their NinjaOne scope, log the approval, and prevent token replay.
+The token is `<base64url(payload)>.<base64url(hmac_sha256(secret, encoded_payload))>`. Canonical body JSON uses sorted keys, compact separators and UTF-8. Tokens are short-lived and single-use within the running gateway process. The gateway maintains a bounded in-memory replay cache; a production approval service should persist consumed `jti` values so a process restart cannot make a token reusable. It should also authenticate the human, authorize their NinjaOne scope, and audit each approval.
 
 ## Tools
 
