@@ -219,7 +219,11 @@ async def execute_paginated_endpoint(endpoint:str,query:dict[str,Any]|None=None,
         return {"error":"Pagination parameters are not both declared by this endpoint. Inspect its OpenAPI schema.","complete":False}
     if page_parameter==page_size_parameter:return {"error":"Page and page-size parameters must differ.","complete":False}
     base_query=dict(query or {})
-    try:\n        _validate_inputs(found,base_query,None)\n    except ValueError as exc:\n        return {"error":str(exc),"complete":False}\n    if page_parameter in base_query or page_size_parameter in base_query:
+    try:
+        _validate_inputs(found,base_query,None)
+    except ValueError as exc:
+        return {"error":str(exc),"complete":False}
+    if page_parameter in base_query or page_size_parameter in base_query:
         return {"error":"Pass pagination values through the dedicated arguments, not query.","complete":False}
     items=[];pages=0;finished=False
     try:
