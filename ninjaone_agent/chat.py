@@ -1,6 +1,7 @@
 """Fast, predictable routing between local chat and NinjaOne MCP operations."""
 from __future__ import annotations
 
+import difflib
 import re
 
 _RESOURCE_WORDS = {
@@ -17,7 +18,8 @@ _OPERATION_WORDS = {
     "view", "details", "detail", "status", "installed", "missing", "failed",
     "offline", "online", "active", "inactive", "whose", "starting", "starts",
     "beginning", "ending", "ends", "assigned", "belonging", "older", "newer",
-    "all", "every", "which", "how", "many", "number", "total",
+    "all", "every", "which", "how", "many", "number", "total", "name", "names",
+    "info", "information", "data", "records", "give", "tell",
 }
 _GREETING_ONLY = re.compile(
     r"^(hi|hello|hey|good morning|good afternoon|good evening|thanks|thank you|"
@@ -38,7 +40,10 @@ def should_use_mcp(question: str, previous_mode: str | None = None) -> bool:
         return False
 
     words = set(re.findall(r"[a-z0-9]+", value.casefold()))
-    has_resource = bool(words & _RESOURCE_WORDS)
+    has_resource = bool(words & _RESOURCE_WORDS) or any(
+        difflib.get_close_matches(word, _RESOURCE_WORDS, n=1, cutoff=0.82)
+        for word in words
+    )
     has_operation = bool(words & _OPERATION_WORDS)
 
     if has_resource and has_operation:
