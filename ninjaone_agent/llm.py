@@ -56,8 +56,8 @@ class LocalLLM:
         # colon, e.g. {"arguments":{"query:"organizations"}}. Repair only
         # this unambiguous key-boundary typo before the normal strict parser.
         raw = re.sub(
-            r'"([A-Za-z_][A-Za-z0-9_]*)\\s*:\\s*(?=")',
-            r'"\\1": ',
+            r'"([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?=")',
+            r'"\1": ',
             raw,
         )
         decoder = json.JSONDecoder()
