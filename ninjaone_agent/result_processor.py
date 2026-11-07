@@ -19,8 +19,13 @@ def _matches(record: Any, condition: dict[str, Any]) -> bool:
     field = str(condition["field"])
     expected = condition.get("value")
     operator = condition.get("operator", "eq")
-    if field.casefold() in {"name", "devicename", "displayname", "systemname", "hostname"} and isinstance(record, dict):
+    if field.casefold() in {"name", "username", "fullname", "devicename", "displayname", "systemname", "hostname"} and isinstance(record, dict):
         actual_values = [record.get(key) for key in DEVICE_NAME_FIELDS if record.get(key) not in (None, "")]
+        person_name = " ".join(str(record.get(key, "")).strip() for key in ("firstName", "lastName")).strip()
+        if person_name:
+            actual_values.append(person_name)
+        if record.get("email"):
+            actual_values.append(record["email"])
     else:
         actual_values = [_get_path(record, field)]
 
@@ -74,8 +79,7 @@ def extract_records(api_result: Any) -> list[Any] | None:
         arrays = [value for value in data.values() if isinstance(value, list)]
         if len(arrays) == 1:
             return arrays[0]
-        # Detail endpoints often return one record object rather than a list.
-        if any(key in data for key in ("id", "uid", "displayName", "systemName", "name")):
+        if any(key in data for key in ("id", "uid", "displayName", "systemName", "name", "firstName")):
             return [data]
     return None
 
@@ -90,11 +94,22 @@ def process_result(task: dict[str, Any], api_result: Any) -> dict[str, Any]:
                 "complete": False, "raw_response": api_result}
     filters = task.get("filters", [])
     filtered = [record for record in records if all(_matches(record, condition) for condition in filters)]
+    count_field = task.get("count_field")
+    if count_field:
+        related_ids = set()
+        for record in filtered:
+            values = _get_path(record, count_field)
+            if isinstance(values, list):
+                related_ids.update(str(value) for value in values if value is not None)
+        count = len(related_ids)
+    else:
+        count = len(filtered)
     truncated = is_truncated(api_result)
     complete = api_result.get("complete", True) if isinstance(api_result, dict) else True
     operation = task["operation"]
     result = {
-        "task": task, "status": "success", "count": len(filtered),
+        "task": task, "status": "success", "count": count,
+        "matched_subjects": len(filtered) if count_field else None,
         "total_records_received": len(records),
         "complete": bool(complete) and not truncated,
         "truncated": truncated,
