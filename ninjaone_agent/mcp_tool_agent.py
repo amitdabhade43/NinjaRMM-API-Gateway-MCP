@@ -93,6 +93,14 @@ async def run_mcp_question(llm: LocalLLM, manager: MultiMCPManager, question: st
         return "I couldn't select a valid read-only MCP tool for that request."
 
     arguments = validate_tool_arguments(selected, selection.get("arguments", {}))
+    # The NinjaOne Gateway's generic endpoint executor can reach write
+    # operations too. Require a concrete GET endpoint before invoking it.
+    if selected.server.casefold() == "ninjaone" and selected.name in {
+        "execute_endpoint", "execute_paginated_endpoint"
+    }:
+        endpoint = arguments.get("endpoint")
+        if not isinstance(endpoint, str) or not endpoint.lstrip().upper().startswith("GET "):
+            raise PermissionError("Only explicitly discovered GET endpoints may be executed.")
     result = await manager.call_tool(selected.qualified_name, arguments)
     result_text = json.dumps(result, ensure_ascii=False, default=str)[:18000]
     response_system = (
