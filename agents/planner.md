@@ -29,6 +29,7 @@ Rules:
 - NinjaOne device names may be stored as displayName, systemName, dnsName, or netbiosName. Keep the logical filter field as "name"; the result processor checks these documented fields.
 - Express conditions such as offline, enabled, disabled, open, closed, technician and end user as filters.
 - Technician-only requests must filter userType equal to TECHNICIAN; do not count END_USER records as technicians.
+- Treat systems, endpoints, computers, workstations, servers and machines as NinjaOne devices unless the user clearly identifies another resource. Use entity "devices" for these inventory requests.
 - For searches across all devices, do not set an identifier. The executor will select and paginate a collection endpoint.
 - Never invent API paths, HTTP methods, parameter names, IDs or query values.
 - Always leave path_params and query as empty objects. The executor derives valid API parameters only from the inspected OpenAPI schema.
