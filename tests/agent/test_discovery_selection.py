@@ -56,3 +56,19 @@ def test_startswith_filter_is_case_insensitive():
     from ninjaone_agent.result_processor import _matches
     assert _matches({"name": "2QN-LAPTOP-01"},
                     {"field": "name", "operator": "startswith", "value": "2qn"})
+
+
+def test_device_name_prefix_prefers_device_collection_not_search_endpoint():
+    candidates = [
+        {"endpoint": "GET /v2/devices/search", "path": "/v2/devices/search"},
+        {"endpoint": "GET /v2/devices", "path": "/v2/devices"},
+        {"endpoint": "GET /v2/device/{id}", "path": "/v2/device/{id}"},
+    ]
+    selected = choose_candidate(
+        candidates, {"mode": "local_semantic", "selected": [
+            {"endpoint": "GET /v2/devices/search", "purpose": "search devices"}
+        ]},
+        {"entity": "devices", "operation": "list", "identifier": None,
+         "filters": [{"field": "name", "operator": "startswith", "value": "2qn"}]},
+    )
+    assert selected["endpoint"] == "GET /v2/devices"
