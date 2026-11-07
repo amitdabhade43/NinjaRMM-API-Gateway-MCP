@@ -20,8 +20,12 @@ _WORDS = re.compile(r"[a-z0-9_]+")
 _READ_PREFIXES = ("get_", "list_", "search_", "find_", "read_", "inspect_",
                   "discover_", "describe_", "query_", "fetch_", "lookup_")
 _NINJAONE_SAFE_TOOLS = {
+    # Original validated Gateway tools.
     "discover_endpoints", "inspect_endpoint", "execute_endpoint",
     "execute_paginated_endpoint", "execute_raw_request",
+    # Seven-tool compatibility surface from the reference repository.
+    "find_endpoint", "describe_endpoint", "call", "raw_call",
+    "memory_save", "memory_list", "memory_delete",
 }
 
 
@@ -120,7 +124,7 @@ def _normalize_decision(
     # but omits a concrete tool, route to the server's discovery tool. This
     # discovers the correct API operation instead of executing an invented path.
     if selected is None and action in {
-        "get", "list", "search", "find", "discover_endpoint",
+        "get", "list", "search", "find", "find_endpoint", "discover_endpoint",
         "choose_endpoint", "select_endpoint", "lookup",
     }:
         selected = next(
@@ -201,9 +205,12 @@ async def run_mcp_question(
         "argument schemas supplied. Never invent endpoint names, parameters, "
         "records, or results. First discover an API operation when needed, "
         "inspect its schema before execution when parameters are not clear, "
-        "then execute only a GET operation. Never call write, create, update, "
-        "delete, or action tools. execute_raw_request may be used only for a "
-        "concrete GET request that matches the OpenAPI specification. Return JSON only in one of these "
+        "then execute only GET operations against the NinjaOne tenant. The "
+        "call and raw_call aliases follow the same GET-only rule. Local "
+        "memory_save, memory_list and memory_delete tools manage saved query "
+        "templates only; use them only when the user explicitly asks to save, "
+        "list, or delete a saved query. Never use these memory tools to infer "
+        "permission for a tenant API write. Return JSON only in one of these "
         "forms: {\"action\":\"call\",\"tool\":\"server.tool\","
         "\"arguments\":{}} or {\"action\":\"final\",\"answer\":\"...\"}. "
         "The action field must be exactly call or final; never put a tool name "
@@ -302,14 +309,21 @@ async def run_mcp_question(
         seen_calls.add(call_key)
 
         if selected.server.casefold() == "ninjaone":
-            if selected.name == "execute_raw_request":
+            if selected.name in {"execute_raw_request", "raw_call"}:
                 request = arguments.get("request")
                 if not isinstance(request, str) or not request.lstrip().upper().startswith("GET "):
                     raise PermissionError("Raw NinjaOne requests are GET-only in generic mode.")
-            if selected.name in {"execute_endpoint", "execute_paginated_endpoint"}:
+            if selected.name in {"execute_endpoint", "execute_paginated_endpoint", "call"}:
                 endpoint = arguments.get("endpoint")
                 if not isinstance(endpoint, str) or not endpoint.lstrip().upper().startswith("GET "):
                     raise PermissionError("Only explicitly discovered GET endpoints may be executed.")
+            if selected.name == "memory_save" and not re.search(r"\\b(save|remember|store)\\b", question, re.I):
+                raise PermissionError("Save a query template only when the user explicitly asks to save or remember it.")
+            if selected.name == "memory_delete" and not (
+                re.search(r"\\b(delete|remove|forget)\\b", question, re.I)
+                and re.search(r"\\b(saved|memory|query|search)\\b", question, re.I)
+            ):
+                raise PermissionError("Delete only a saved query when the user explicitly asks to remove it.")
 
         try:
             result = await manager.call_tool(selected.qualified_name, arguments)
@@ -333,7 +347,7 @@ async def run_mcp_question(
         # LLM to visually scan a potentially large page of JSON.
         is_ninjaone_metadata_step = (
             selected.server.casefold() == "ninjaone"
-            and selected.name in {"discover_endpoints", "inspect_endpoint"}
+            and selected.name in {"discover_endpoints", "inspect_endpoint", "find_endpoint", "describe_endpoint"}
         )
         if active_filters and not filters_applied and not is_ninjaone_metadata_step:
             try:
