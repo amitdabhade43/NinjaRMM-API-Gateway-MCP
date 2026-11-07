@@ -52,8 +52,8 @@ async def run_agent_workflow(
     """Execute understand -> OLMo tool-agent -> final answer as a LangGraph."""
     async def understand(state: AgentState) -> dict[str, Any]:
         prompt = (
-            "CONVERSATION CONTEXT:\\n" + (state.get("conversation_context") or "None")
-            + "\\n\\nUSER REQUEST:\\n" + state["question"]
+            "CONVERSATION CONTEXT:\n" + (state.get("conversation_context") or "None")
+            + "\n\nUSER REQUEST:\n" + state["question"]
         )
         plan = await llm.complete_json(PLAN_SYSTEM, prompt)
         if not isinstance(plan.get("tasks"), list):
@@ -65,7 +65,7 @@ async def run_agent_workflow(
     async def agent(state: AgentState) -> dict[str, Any]:
         plan_text = json.dumps(state["plan"], ensure_ascii=False, default=str)
         context = (state.get("conversation_context") or "") + (
-            "\\n\\nOLMo DECOMPOSED EXECUTION PLAN (follow this intent; discover actual endpoints):\\n"
+            "\n\nOLMo DECOMPOSED EXECUTION PLAN (follow this intent; discover actual endpoints):\n"
             + plan_text
         )
         if state["plan"].get("needs_clarification"):
