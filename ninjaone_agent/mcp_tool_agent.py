@@ -20,10 +20,6 @@ _WORDS = re.compile(r"[a-z0-9_]+")
 _READ_PREFIXES = ("get_", "list_", "search_", "find_", "read_", "inspect_",
                   "discover_", "describe_", "query_", "fetch_", "lookup_")
 _NINJAONE_SAFE_TOOLS = {
-    # Original validated Gateway tools.
-    "discover_endpoints", "inspect_endpoint", "execute_endpoint",
-    "execute_paginated_endpoint", "execute_raw_request",
-    # Seven-tool compatibility surface from the reference repository.
     "find_endpoint", "describe_endpoint", "call", "raw_call",
     "memory_save", "memory_list", "memory_delete",
 }
@@ -311,6 +307,7 @@ async def run_mcp_question(
     question: str,
     max_steps: int = 4,
     conversation_context: str = "",
+    approval_callback=None,
 ) -> str:
     """Run a bounded discover/inspect/execute loop over safe MCP tools."""
     all_tools = manager.list_tools()
@@ -331,9 +328,7 @@ async def run_mcp_question(
             except Exception as exc:
                 return f"Unable to complete the NinjaOne count: {type(exc).__name__}: {exc}"
 
-    # Present only the seven compatibility tools to OLMo. The original
-    # Gateway tools remain registered and available, but duplicate aliases
-    # are not added to the model's decision prompt.
+    # The MCP server exposes only the seven compatibility tools.
     has_compat_surface = any(
         item.server.casefold() == "ninjaone"
         and item.name in _NINJAONE_COMPAT_TOOLS
@@ -371,9 +366,11 @@ async def run_mcp_question(
         "per step, or return a final answer. Use only the exact tool names and "
         "argument schemas supplied. Never invent endpoint names, parameters, "
         "records, or results. First discover an API operation when needed, "
-        "inspect its schema before execution when parameters are not clear, "
-        "then execute only GET operations against the NinjaOne tenant. The "
-        "call and raw_call aliases follow the same GET-only rule. Local "
+        "inspect its schema before execution when parameters are not clear. "
+        "GET calls may execute automatically. POST, PUT and PATCH may execute "
+        "only after the Python CLI obtains explicit user confirmation. DELETE "
+        "is permanently blocked. The call and raw_call aliases follow these "
+        "same rules. Local "
         "memory_save, memory_list and memory_delete tools manage saved query "
         "templates only; use them only when the user explicitly asks to save, "
         "list, or delete a saved query. Never use these memory tools to infer "
@@ -476,14 +473,27 @@ async def run_mcp_question(
         seen_calls.add(call_key)
 
         if selected.server.casefold() == "ninjaone":
-            if selected.name in {"execute_raw_request", "raw_call"}:
-                request = arguments.get("request")
-                if not isinstance(request, str) or not request.lstrip().upper().startswith("GET "):
-                    raise PermissionError("Raw NinjaOne requests are GET-only in generic mode.")
-            if selected.name in {"execute_endpoint", "execute_paginated_endpoint", "call"}:
-                endpoint = arguments.get("endpoint")
-                if not isinstance(endpoint, str) or not endpoint.lstrip().upper().startswith("GET "):
-                    raise PermissionError("Only explicitly discovered GET endpoints may be executed.")
+            method = ""
+            operation = ""
+            if selected.name == "raw_call":
+                operation = str(arguments.get("request", "")).strip()
+                method = operation.split(None, 1)[0].upper() if operation else ""
+            elif selected.name == "call":
+                operation = str(arguments.get("endpoint", "")).strip()
+                method = operation.split(None, 1)[0].upper() if operation else ""
+            if selected.name in {"call", "raw_call"}:
+                if method == "DELETE":
+                    raise PermissionError("DELETE is permanently blocked, even after confirmation.")
+                if method not in {"GET", "POST", "PUT", "PATCH"}:
+                    raise PermissionError("The operation must use GET, POST, PUT or PATCH.")
+                if method in {"POST", "PUT", "PATCH"}:
+                    if approval_callback is None:
+                        return (f"This request proposes {operation}. Run it in interactive mode "
+                                "to review the operation and confirm before execution.")
+                    approved = approval_callback(operation, arguments.get("body"))
+                    if not approved:
+                        return f"Cancelled. No {method} request was sent to NinjaOne."
+                    arguments["approval_token"] = "LOCAL_USER_CONFIRMED"
             if selected.name == "memory_save" and not re.search(r"\b(save|remember|store)\b", question, re.I):
                 raise PermissionError("Save a query template only when the user explicitly asks to save or remember it.")
             if selected.name == "memory_list" and not re.search(
