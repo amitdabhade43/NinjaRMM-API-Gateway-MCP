@@ -59,3 +59,13 @@ Only discover_endpoints, inspect_endpoint, execute_endpoint and execute_paginate
     .\.venv\Scripts\python.exe -m pytest tests/agent -q
 
 Planner output is validated before use. API paths and parameters are selected from Gateway discovery and inspected against the OpenAPI schema. Device name filtering checks displayName, systemName, dnsName, netbiosName, name and hostname. Partial counts are never presented as confirmed totals.
+
+## Generic MCP question mode (Stage 2 initial slice)
+
+The generic selector can choose and invoke one relevant read-only tool from the configured MCP servers. It uses a lightweight lexical shortlist before asking OLMo to select a tool, validates required and unknown arguments against the discovered input schema, and uses server-qualified names.
+
+    .\\.venv\\Scripts\\python.exe .\\ninjaone_agent.py --mcp-question "Find the NinjaOne API endpoint for listing devices"
+
+This is an isolated test mode. The existing `--question` workflow remains the default and is unchanged. The first execution slice deliberately makes one tool call only; multi-step discovery/inspect/execute loops and additional result verification will be added after this mode is tested.
+
+The generic selector uses a conservative name-based read-only filter. For NinjaOne, only discovery/inspection and endpoint execution tools are candidates, and endpoint execution is additionally restricted to arguments beginning with `GET `. Gateway-side approval and method enforcement remain authoritative. Do not expose write-capable MCP servers to this mode until explicit per-tool permissions are configured.
