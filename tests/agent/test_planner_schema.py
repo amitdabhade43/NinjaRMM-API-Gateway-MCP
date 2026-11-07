@@ -61,3 +61,18 @@ def test_systems_and_endpoints_are_normalized_to_ninjaone_devices():
     assert normalize_entity("endpoints") == "devices"
     assert normalize_entity("managed computers") == "devices"
     assert normalize_entity("organizations") == "organizations"
+
+
+def test_person_device_access_question_becomes_end_user_relationship_count():
+    from ninjaone_agent.planner import validate_plan
+    plan = validate_plan({"tasks": [{"entity": "devices", "operation": "count"}]},
+                         "how many systems access richard o has in ninjaone")
+    task = plan["tasks"][0]
+    assert task["entity"] == "end-users"
+    assert task["count_field"] == "accessibleDeviceIds"
+    assert task["filters"] == [{"field": "name", "operator": "contains", "value": "richard o"}]
+
+
+def test_standard_person_access_wording_is_understood():
+    from ninjaone_agent.planner import _requested_user_access_name
+    assert _requested_user_access_name("how many systems does Richard O have access to?") == "Richard O"
