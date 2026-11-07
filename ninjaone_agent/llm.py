@@ -42,19 +42,33 @@ class LocalLLM:
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
 
+        decoder = json.JSONDecoder()
         try:
             value = json.loads(raw)
-        except json.JSONDecodeError:
-            start, end = raw.find("{"), raw.rfind("}")
-            if start < 0 or end <= start:
-                raise ValueError("OLMo did not return a JSON object.")
-            try:
-                value = json.loads(raw[start : end + 1])
-            except json.JSONDecodeError as exc:
+        except json.JSONDecodeError as original_error:
+            # OLMo may append an extra brace, quote, or short explanation
+            # after an otherwise complete JSON object. Decode the first
+            # complete object instead of requiring the entire output to match.
+            value = None
+            last_error = original_error
+            for index, character in enumerate(raw):
+                if character != "{":
+                    continue
+                try:
+                    candidate, _ = decoder.raw_decode(raw, index)
+                    if isinstance(candidate, dict):
+                        value = candidate
+                        break
+                except json.JSONDecodeError as exc:
+                    last_error = exc
+
+            if value is None:
+                if "{" not in raw:
+                    raise ValueError("OLMo did not return a JSON object.")
                 raise ValueError(
-                    f"OLMo returned invalid JSON (line {exc.lineno}, "
-                    f"column {exc.colno})."
-                ) from exc
+                    f"OLMo returned invalid JSON (line {last_error.lineno}, "
+                    f"column {last_error.colno})."
+                ) from last_error
 
         if not isinstance(value, dict):
             raise ValueError("OLMo response must be a JSON object.")
