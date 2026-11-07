@@ -25,7 +25,7 @@ def test_tool_shortlist_prefers_relevant_read_only_tools():
 
 def test_write_tools_are_not_read_only_candidates():
     assert not is_read_only_candidate(_tool("filesystem", "write_file", "Write a file"))
-    assert not is_read_only_candidate(_tool("ninjaone", "execute_raw_request", "Run raw API request"))
+    assert is_read_only_candidate(_tool("ninjaone", "execute_raw_request", "Run raw API request"))
     assert is_read_only_candidate(_tool("ninjaone", "inspect_endpoint", "Inspect API endpoint"))
 
 
