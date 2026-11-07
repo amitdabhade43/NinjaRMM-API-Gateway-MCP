@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, AsyncIterator
 
 from .config import AgentConfig
@@ -51,6 +52,14 @@ class LocalLLM:
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
 
+        # Local models sometimes omit the closing quote before a JSON key's
+        # colon, e.g. {"arguments":{"query:"organizations"}}. Repair only
+        # this unambiguous key-boundary typo before the normal strict parser.
+        raw = re.sub(
+            r'"([A-Za-z_][A-Za-z0-9_]*)\\s*:\\s*(?=")',
+            r'"\\1": ',
+            raw,
+        )
         decoder = json.JSONDecoder()
         try:
             value = json.loads(raw)
