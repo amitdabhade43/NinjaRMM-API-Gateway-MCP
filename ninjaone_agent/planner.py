@@ -9,11 +9,12 @@ INSTRUCTION = PROJECT_ROOT / "agents" / "planner.md"
 VALID_OPERATIONS = {"count", "list", "list_and_count", "details", "summary"}
 VALID_FORMATS = {"count_only", "list", "list_and_count", "summary", "detailed"}
 _FILTER_INTENT = re.compile(
-    r"\\b(offline|online|active|inactive|enabled|disabled|open|closed|with|whose|"
+    r"\b(offline|online|active|inactive|enabled|disabled|open|closed|with|whose|"
     r"starting|starts|beginning|ending|ends|assigned|unassigned|managed|unmanaged|"
     r"failed|warning|critical|healthy|unhealthy|status|technician|end.?user|"
-    r"belonging|greater than|less than|older than|newer than)\\b", re.I
+    r"belonging|greater than|less than|older than|newer than)\b", re.I
 )
+
 
 def validate_plan(plan: dict[str, Any], original_question: str) -> dict[str, Any]:
     tasks = plan.get("tasks")
@@ -43,8 +44,9 @@ def validate_plan(plan: dict[str, Any], original_question: str) -> dict[str, Any
                 continue
             clean_filters.append({"field": str(item["field"])[:100],
                                   "operator": operator, "value": item.get("value")})
-        # A plain "how many X?" is an unfiltered total. Do not let an LLM
-        # accidentally narrow it with an invented/default filter.
+        # "How many X?" means the unfiltered total unless the user states
+        # a condition. Do not allow a planner-generated default filter to
+        # silently turn an inventory count into a filtered count.
         if operation == "count" and not explicit_filter_intent:
             clean_filters = []
         normalized.append({
@@ -63,7 +65,8 @@ def validate_plan(plan: dict[str, Any], original_question: str) -> dict[str, Any
             "tasks": normalized, "response_format": response_format,
             "original_question": original_question}
 
+
 async def create_plan(llm: LocalLLM, question: str) -> dict[str, Any]:
     system = INSTRUCTION.read_text(encoding="utf-8")
-    raw = await llm.complete_json(system, "Create an execution plan for this request. JSON only:\\n\\n" + question)
+    raw = await llm.complete_json(system, "Create an execution plan for this request. JSON only:\n\n" + question)
     return validate_plan(raw, question)
