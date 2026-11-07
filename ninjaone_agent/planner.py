@@ -31,7 +31,7 @@ def validate_plan(plan: dict[str, Any], original_question: str) -> dict[str, Any
             if not isinstance(item, dict) or not item.get("field"):
                 continue
             operator = str(item.get("operator", "eq")).lower()
-            if operator not in {"eq", "ne", "contains", "in", "gt", "gte", "lt", "lte"}:
+            if operator not in {"eq", "ne", "contains", "startswith", "in", "gt", "gte", "lt", "lte"}:
                 continue
             clean_filters.append({"field": str(item["field"])[:100],
                                   "operator": operator, "value": item.get("value")})
