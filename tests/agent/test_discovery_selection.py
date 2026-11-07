@@ -113,3 +113,14 @@ def test_systems_alias_uses_ninjaone_device_collection():
         {"endpoint": "GET /v2/organization/documents", "purpose": "organization documents"}
     ]}, task)
     assert selected["endpoint"] == "GET /v2/devices"
+
+
+def test_end_user_access_count_selects_end_user_collection_not_devices():
+    candidates = [
+        {"endpoint": "GET /v2/devices", "path": "/v2/devices"},
+        {"endpoint": "GET /v2/user/end-users", "path": "/v2/user/end-users"},
+    ]
+    selected = choose_candidate(candidates, {"mode": "local_semantic", "selected": [
+        {"endpoint": "GET /v2/devices", "purpose": "device inventory"}
+    ]}, {"entity": "end-users", "operation": "count", "identifier": None, "filters": []})
+    assert selected["endpoint"] == "GET /v2/user/end-users"
