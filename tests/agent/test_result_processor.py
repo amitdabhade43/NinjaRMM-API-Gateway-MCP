@@ -148,3 +148,31 @@ def test_incomplete_metadata_is_preserved():
     })
     assert result["complete"] is False
     assert result["truncated"] is True
+
+
+def test_accessible_device_count_counts_user_access_ids_not_all_devices():
+    task = {"description": "Count devices accessible to Richard O", "operation": "count",
+            "filters": [{"field": "name", "operator": "contains", "value": "richard o"}],
+            "count_field": "accessibleDeviceIds"}
+    result = process_result(task, {
+        "endpoint": "GET /v2/user/end-users", "complete": True,
+        "data": [
+            {"id": 1, "firstName": "Richard", "lastName": "O", "assignedDeviceIds": [1, 2],
+             "accessibleDeviceIds": [1, 2, 3]},
+            {"id": 2, "firstName": "Other", "lastName": "Person", "accessibleDeviceIds": [4, 5]},
+        ],
+    })
+    assert result["count"] == 3
+    assert result["matched_subjects"] == 1
+    assert result["total_records_received"] == 2
+
+
+def test_accessible_device_count_deduplicates_device_ids_across_matching_users():
+    task = {"description": "Count devices accessible to Richard O", "operation": "count",
+            "filters": [{"field": "name", "operator": "contains", "value": "richard o"}],
+            "count_field": "accessibleDeviceIds"}
+    result = process_result(task, {"complete": True, "data": [
+        {"firstName": "Richard", "lastName": "O", "accessibleDeviceIds": [1, 2]},
+        {"firstName": "Richard", "lastName": "O", "accessibleDeviceIds": [2, 3]},
+    ]})
+    assert result["count"] == 3
