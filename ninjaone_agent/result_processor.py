@@ -156,7 +156,7 @@ def process_result(task: dict[str, Any], api_result: Any) -> dict[str, Any]:
     complete = api_result.get("complete", True) if isinstance(api_result, dict) else True
     operation = task["operation"]
     result = {
-        "task": task, "status": "success", "count": count,
+        "task": task, "status": "success", "count": count, "clarification_required": False,
         "matched_subjects": len(filtered) if count_field else None,
         "total_records_received": len(records),
         "complete": bool(complete) and not truncated,
