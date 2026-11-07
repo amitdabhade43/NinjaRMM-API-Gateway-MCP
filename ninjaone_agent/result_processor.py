@@ -106,7 +106,7 @@ def process_result(task: dict[str, Any], api_result: Any) -> dict[str, Any]:
     count_field = task.get("count_field")
     # Never combine access lists from several people with the same/similar
     # name. Ask the user to identify the intended person first.
-    if count_field and len(filtered) > 1:
+    if count_field and len(filtered) != 1:
         return {
             "task": task, "status": "success", "count": None,
             "clarification_required": True, "complete": bool(api_result.get("complete", True)),
