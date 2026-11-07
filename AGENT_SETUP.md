@@ -82,3 +82,18 @@ The generic mode is still an initial read-only implementation. For NinjaOne, raw
 The generic --mcp-question agent can translate varied wording into reusable structured filters instead of relying on exact phrase matching. For example, 'begins with', 'starts with', and 'prefix' map to starts_with; 'includes', 'has', and 'contains' map to contains; 'exactly' maps to equals; and 'ends in' maps to ends_with.
 
 Filters are applied in Python to returned record collections, with case-insensitive matching and support for dotted/nested fields. Supported operators include equals, not_equals, contains, not_contains, starts_with, ends_with, in, not_in, numeric comparisons, and empty/not-empty checks. The agent records the number of records examined and matched. This keeps content matching deterministic and avoids asking the local model to scan every record itself.
+
+
+### Agent runtime design notes (Clawd-Code review)
+
+We reviewed the public GPT-AGI/Clawd-Code project as an architectural reference. We are adopting selected general patterns rather than importing its coding-CLI implementation:
+
+- A bounded multi-turn tool loop with a clear stop condition.
+- A central tool registry and full-schema validation at dispatch time.
+- A compact tool catalog for model context, while retaining full schemas locally for validation.
+- Explicit read-only permissions and safe execution boundaries.
+- Bounded tool-result history so local inference prompts stay manageable.
+
+The local OLMo agent also normalizes common malformed action variants (for example, a valid tool field paired with action=get or action=discover_endpoint). If a NinjaOne planning action omits a concrete tool, it safely falls back to endpoint discovery instead of executing a model-invented API path. Missing generic search-intent arguments such as intent/query are populated from the original user request only when required by the selected tool schema.
+
+Reference: https://github.com/GPT-AGI/Clawd-Code
