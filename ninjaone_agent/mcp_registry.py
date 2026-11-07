@@ -127,6 +127,30 @@ class MultiMCPManager:
         """Return tools with server-qualified names; duplicate tool names remain distinct."""
         return sorted(self.tools.values(), key=lambda item: item.qualified_name)
 
+    async def call_tool(self, qualified_name: str, arguments: dict[str, Any]) -> Any:
+        """Execute a previously discovered, server-qualified tool."""
+        tool = self.tools.get(qualified_name)
+        if tool is None:
+            raise KeyError(f"Unknown MCP tool: {qualified_name}")
+        session = self.sessions.get(tool.server)
+        if session is None:
+            raise RuntimeError(f"MCP server {tool.server!r} is not connected.")
+        result = await session.call_tool(tool.name, arguments)
+        if getattr(result, "isError", False):
+            messages = [getattr(item, "text", "") for item in getattr(result, "content", [])]
+            raise RuntimeError("MCP tool error: " + " ".join(messages))
+        structured = getattr(result, "structuredContent", None)
+        if structured is not None:
+            return structured
+        for item in getattr(result, "content", []) or []:
+            text = getattr(item, "text", None)
+            if text:
+                try:
+                    return json.loads(text)
+                except json.JSONDecodeError:
+                    return text
+        return {}
+
     def server_status(self) -> dict[str, Any]:
         return {
             "connected": sorted(self.sessions),
