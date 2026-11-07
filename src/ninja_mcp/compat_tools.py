@@ -50,7 +50,12 @@ def register_compat_tools(mcp, spec_getter, execute, match_template) -> None:
     @mcp.tool()
     async def find_endpoint(query: str, category: str | None = None,
                             method: str | None = None, limit: int = 20) -> dict[str, Any]:
-        """Find NinjaOne API endpoints by natural-language query, category or HTTP method."""
+        """Fuzzy-search the full NinjaOne OpenAPI catalogue using natural language.
+        Searches paths, summaries, descriptions, tags, categories and operation IDs.
+        By default searches across all supported methods (GET, POST, PUT and PATCH).
+        Set category or method only when the user explicitly asks for that restriction.
+        Returns the best-ranked endpoint summaries; use describe_endpoint only for the
+        selected endpoint when its parameters or request schema are needed."""
         spec = spec_getter()
         if method:
             method = method.upper()
