@@ -24,7 +24,16 @@ async def run_question(question: str) -> int:
             def show_progress(result):
                 task = result["task"]
                 if result.get("status") == "success" and "count" in result:
-                    print(f"[completed] {task['description']}: {result['count']}", flush=True)
+                    if result.get("complete", True):
+                        print(f"[completed] {task['description']}: {result['count']} match(es)", flush=True)
+                    else:
+                        pages = result.get("pages_fetched")
+                        page_note = f" across {pages} page(s)" if pages else ""
+                        print(
+                            f"[partial] {task['description']}: {result['count']} match(es) "
+                            f"among {result.get('total_records_received', 0)} record(s) checked{page_note}",
+                            flush=True,
+                        )
                 elif result.get("status") == "success":
                     print(f"[completed] {task['description']}", flush=True)
                 else:
