@@ -35,6 +35,15 @@ class LocalLLM:
         )
         return response.choices[0].message.content or ""
 
+    async def chat(self, messages: list[dict[str, str]], temperature: float = 0.25) -> str:
+        """Answer a normal chat turn using the supplied bounded conversation history."""
+        response = await self.client.chat.completions.create(
+            model=self.config.model,
+            messages=messages,
+            temperature=temperature,
+        )
+        return response.choices[0].message.content or ""
+
     @staticmethod
     def _parse_json_object(raw: str) -> dict[str, Any]:
         """Parse a JSON object, allowing a surrounding Markdown code fence/prose."""
@@ -46,9 +55,6 @@ class LocalLLM:
         try:
             value = json.loads(raw)
         except json.JSONDecodeError as original_error:
-            # OLMo may append an extra brace, quote, or short explanation
-            # after an otherwise complete JSON object. Decode the first
-            # complete object instead of requiring the entire output to match.
             value = None
             last_error = original_error
             for index, character in enumerate(raw):
