@@ -10,6 +10,7 @@ from .executor import execute_plan
 from .llm import LocalLLM
 from .mcp_gateway import GatewayConnection
 from .mcp_registry import MCPServerConfig, MultiMCPManager
+from .mcp_tool_agent import run_mcp_question
 from .planner import create_plan
 from .response import format_response
 
@@ -25,6 +26,23 @@ async def list_mcp_tools() -> int:
             print(f"\n[{tool.qualified_name}] {tool.description}", flush=True)
             print(json.dumps(tool.input_schema, ensure_ascii=False), flush=True)
     return 0
+
+
+async def run_generic_mcp_question(question: str) -> int:
+    config = AgentConfig.from_env()
+    llm = LocalLLM(config)
+    try:
+        servers = MCPServerConfig.load_all(config.mcp_command, config.mcp_args)
+        print("Connecting to configured MCP servers...", flush=True)
+        async with MultiMCPManager(servers) as manager:
+            print("Connected:", ", ".join(manager.server_status()["connected"]), flush=True)
+            print("Selecting a relevant read-only tool...", flush=True)
+            answer = await run_mcp_question(llm, manager, question)
+        print("\\nResult\\n------", flush=True)
+        print(answer, flush=True)
+        return 0
+    finally:
+        await llm.close()
 
 
 async def run_question(question: str) -> int:
@@ -66,10 +84,14 @@ def main() -> None:
     parser.add_argument("-q", "--question", help="Run one question and exit")
     parser.add_argument("--list-mcp-tools", action="store_true",
                         help="Connect configured MCP servers and list their tools without executing them")
+    parser.add_argument("--mcp-question", help="Run one request through the generic read-only MCP tool selector")
     args = parser.parse_args()
     try:
         if args.list_mcp_tools:
             asyncio.run(list_mcp_tools())
+            return
+        if args.mcp_question:
+            asyncio.run(run_generic_mcp_question(args.mcp_question))
             return
         if args.question:
             asyncio.run(run_question(args.question))
