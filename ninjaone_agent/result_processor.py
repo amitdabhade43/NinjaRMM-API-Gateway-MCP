@@ -104,12 +104,14 @@ def process_result(task: dict[str, Any], api_result: Any) -> dict[str, Any]:
     filters = task.get("filters", [])
     filtered = [record for record in records if all(_matches(record, condition) for condition in filters)]
     count_field = task.get("count_field")
+    source_complete = (bool(api_result.get("complete", True)) and not is_truncated(api_result)
+                       if isinstance(api_result, dict) else True)
     # Never combine access lists from several people with the same/similar
-    # name. Ask the user to identify the intended person first.
-    if count_field and len(filtered) != 1:
+    # name, or assume a single match is unique when the source is incomplete.
+    if count_field and (len(filtered) != 1 or not source_complete):
         return {
             "task": task, "status": "success", "count": None,
-            "clarification_required": True, "complete": bool(api_result.get("complete", True)),
+            "clarification_required": True, "complete": source_complete,
             "matched_subjects": len(filtered), "total_records_received": len(records),
             "data": filtered[:20], "endpoint": api_result.get("endpoint"),
         }
