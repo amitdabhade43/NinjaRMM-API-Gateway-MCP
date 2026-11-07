@@ -267,7 +267,19 @@ async def run_mcp_question(
         if selected is None:
             return "OLMo selected a tool that was not in the approved tool shortlist."
 
-        arguments = validate_tool_arguments(selected, normalized_arguments)
+        try:
+            arguments = validate_tool_arguments(selected, normalized_arguments)
+        except ValueError as exc:
+            # Similar to Clawd-Code's tool loop, return validation feedback to
+            # the model so it can repair the call instead of crashing the CLI.
+            history.append({
+                "tool": selected.qualified_name,
+                "tool_error": str(exc),
+                "hint": "Correct the arguments using the supplied tool schema.",
+            })
+            history = history[-4:]
+            continue
+
         call_key = selected.qualified_name + ":" + json.dumps(arguments, sort_keys=True, default=str)
         if call_key in seen_calls:
             return "The agent attempted to repeat the same tool call. Stopping safely."
@@ -281,7 +293,19 @@ async def run_mcp_question(
                 if not isinstance(endpoint, str) or not endpoint.lstrip().upper().startswith("GET "):
                     raise PermissionError("Only explicitly discovered GET endpoints may be executed.")
 
-        result = await manager.call_tool(selected.qualified_name, arguments)
+        try:
+            result = await manager.call_tool(selected.qualified_name, arguments)
+        except Exception as exc:
+            # Keep transient MCP/tool failures inside the bounded reasoning loop.
+            history.append({
+                "tool": selected.qualified_name,
+                "arguments": arguments,
+                "tool_error": f"{type(exc).__name__}: {exc}",
+                "hint": "Use this error to correct the next tool call; do not repeat identical arguments.",
+            })
+            history = history[-4:]
+            continue
+
         entry: dict[str, Any] = {
             "tool": selected.qualified_name,
             "arguments": arguments,
