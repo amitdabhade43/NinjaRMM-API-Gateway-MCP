@@ -5,6 +5,12 @@ from typing import Any
 from .config import AgentConfig
 from .mcp_gateway import GatewayConnection
 
+
+def _has_path_parameters(candidate: dict[str, Any]) -> bool:
+    path = str(candidate.get("path", candidate.get("endpoint", "")))
+    return bool(re.search(r"{[^}]+}", path))
+
+
 def choose_candidate(candidates: list[dict[str, Any]], semantic: dict[str, Any],
                      task: dict[str, Any]) -> dict[str, Any]:
     selected_items = semantic.get("selected", []) if isinstance(semantic, dict) else []
@@ -13,17 +19,29 @@ def choose_candidate(candidates: list[dict[str, Any]], semantic: dict[str, Any],
     selected_pool = [item for key in selected_keys for item in candidates
                      if item.get("endpoint") == key]
     mode = semantic.get("mode") if isinstance(semantic, dict) else None
-    if mode == "local_semantic" and selected_pool:
-        return selected_pool[0]
+    wants_item = task.get("identifier") is not None
 
-    # Fuzzy fallback: choose collection routes for list/count and item routes for details.
-    pool = selected_pool or candidates
-    wants_item = task.get("operation") == "details" or task.get("identifier") is not None
+    # An item route is valid only when the user supplied an identifier.
+    # For name/status searches, always choose a collection route, even when
+    # semantic discovery ranks an /{id} route first.
     if wants_item:
-        shaped = [item for item in pool if re.search(r"{[^}]+}", str(item.get("path", item.get("endpoint", ""))))]
-    else:
-        shaped = [item for item in pool if not re.search(r"{[^}]+}", str(item.get("path", item.get("endpoint", ""))))]
-    return (shaped or pool or candidates)[0]
+        item_pool = [item for item in candidates if _has_path_parameters(item)]
+        preferred = [item for item in selected_pool if _has_path_parameters(item)]
+        pool = preferred or item_pool
+        if pool:
+            return pool[0]
+        raise RuntimeError("No item GET endpoint was discovered for the supplied identifier.")
+
+    collection_pool = [item for item in candidates if not _has_path_parameters(item)]
+    preferred = [item for item in selected_pool if not _has_path_parameters(item)]
+    pool = preferred or collection_pool
+    if pool:
+        return pool[0]
+    raise RuntimeError(
+        "No unscoped collection GET endpoint was discovered. "
+        "Refusing to call an item endpoint because this request has no device ID."
+    )
+
 
 async def discover_for_task(gateway: GatewayConnection, config: AgentConfig,
                             task: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
