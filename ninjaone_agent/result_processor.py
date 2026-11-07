@@ -106,22 +106,40 @@ def process_result(task: dict[str, Any], api_result: Any) -> dict[str, Any]:
     count_field = task.get("count_field")
     source_complete = (bool(api_result.get("complete", True)) and not is_truncated(api_result)
                        if isinstance(api_result, dict) else True)
-    # Never combine access lists from several people with the same/similar
-    # name, or assume a single match is unique when the source is incomplete.
-    if count_field and (len(filtered) != 1 or not source_complete):
+    # Collapse duplicate rows for the same person, but never merge two
+    # distinct people who happen to share a first/last name.
+    unique_people: dict[str, Any] = {}
+    if count_field:
+        for record in filtered:
+            if not isinstance(record, dict):
+                continue
+            email = str(record.get("email") or record.get("emailAddress") or "").casefold().strip()
+            user_id = record.get("id", record.get("userId", record.get("uid")))
+            full_name = " ".join(str(record.get(key, "")).strip()
+                                 for key in ("firstName", "lastName")).casefold().strip()
+            identity = f"email:{email}" if email else (
+                f"id:{user_id}" if user_id is not None else f"name:{full_name}"
+            )
+            if identity.strip() not in {"name:", "email:"}:
+                unique_people.setdefault(identity, record)
+
+    # A unique identity is safe to count; two identities with the same search
+    # name require clarification. Incomplete source results are never trusted.
+    if count_field and (len(unique_people) != 1 or not source_complete):
         return {
             "task": task, "status": "success", "count": None,
             "clarification_required": True, "complete": source_complete,
-            "matched_subjects": len(filtered), "total_records_received": len(records),
-            "data": filtered[:20], "endpoint": api_result.get("endpoint"),
+            "matched_subjects": len(unique_people), "total_records_received": len(records),
+            "data": list(unique_people.values())[:20], "endpoint": api_result.get("endpoint"),
         }
     if count_field:
         related_ids = set()
-        for record in filtered:
+        for record in unique_people.values():
             values = _get_path(record, count_field)
             if isinstance(values, list):
                 related_ids.update(str(value) for value in values if value is not None)
         count = len(related_ids)
+        filtered = list(unique_people.values())
     else:
         count = len(filtered)
     truncated = is_truncated(api_result)
