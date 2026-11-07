@@ -24,21 +24,15 @@ class AgentState(TypedDict, total=False):
 
 
 PLAN_SYSTEM = """You are OLMo, the reasoning and planning brain of a NinjaOne operations agent.
-Understand the user's natural-language request, including spelling mistakes and follow-up context.
-Decompose it into the smallest useful sequence of tasks. Do not invent API paths or claim data.
-Return exactly one JSON object with these keys:
-{
-  "intent": "short description",
-  "tasks": [{"goal": "what data/action is needed", "resource": "likely NinjaOne resource",
-             "operation": "read|create|update|delete|unknown",
-             "filters": [], "fields": [], "depends_on": []}],
-  "answer_requirements": ["what the final answer must contain"],
-  "needs_clarification": false,
-  "clarification_question": ""
-}
-For ordinary read requests, create one task. For multi-part requests, create ordered dependent tasks.
-If the request is ambiguous in a way that prevents safe execution, set needs_clarification=true.
-Do not select a concrete endpoint here; the tool-using agent will discover it from the full API catalogue."""
+Understand the user's request, correct obvious spelling mistakes, and use conversation context.
+Examples: "technicain" means "technician"; "oraganization" means "organization".
+In NinjaOne, a technician is a human staff/technician account, NOT a device label or device type.
+Never reinterpret a named NinjaOne resource as a device label unless the user explicitly says label.
+Return ONLY a compact valid JSON object with exactly these keys:
+{"intent":"...","tasks":["..."],"needs_clarification":false}
+Use a short string for each task, not nested objects. For a clear read/count/list request, needs_clarification must be false.
+Do not ask for clarification merely because the user misspelled a known resource.
+Do not choose API paths here; the tool-using agent will discover the correct operation from the NinjaOne API catalogue."""
 
 
 async def run_agent_workflow(
@@ -55,22 +49,36 @@ async def run_agent_workflow(
             "CONVERSATION CONTEXT:\n" + (state.get("conversation_context") or "None")
             + "\n\nUSER REQUEST:\n" + state["question"]
         )
-        plan = await llm.complete_json(PLAN_SYSTEM, prompt)
-        if not isinstance(plan.get("tasks"), list):
-            raise ValueError("OLMo planner did not return a tasks array.")
-        if on_plan:
-            on_plan(plan)
-        return {"plan": plan}
+        # Planning is helpful for visibility, but malformed planner JSON must
+        # never prevent the tool-using OLMo agent from answering the original request.
+        try:
+            plan = await llm.complete_json(PLAN_SYSTEM, prompt)
+            if not isinstance(plan.get("tasks"), list):
+                raise ValueError("OLMo planner did not return a tasks array.")
+            if on_plan:
+                on_plan(plan)
+            return {"plan": plan}
+        except ValueError as exc:
+            fallback = {
+                "status": "planner_fallback",
+                "reason": str(exc),
+                "message": "Planner output was invalid; the OLMo tool agent will reason from the original request.",
+            }
+            if on_plan:
+                on_plan(fallback)
+            return {"plan": {}}
 
     async def agent(state: AgentState) -> dict[str, Any]:
-        plan_text = json.dumps(state["plan"], ensure_ascii=False, default=str)
-        context = (state.get("conversation_context") or "") + (
-            "\n\nOLMo DECOMPOSED EXECUTION PLAN (follow this intent; discover actual endpoints):\n"
-            + plan_text
-        )
-        if state["plan"].get("needs_clarification"):
-            return {"answer": str(state["plan"].get("clarification_question") or
-                                  "Could you clarify what you want to retrieve or change?")}
+        plan = state.get("plan") or {}
+        context = state.get("conversation_context") or ""
+        if plan and plan.get("status") != "planner_fallback":
+            context += (
+                "\n\nOLMo PLANNING NOTES (the original user request is authoritative; "
+                "correct any mistaken interpretation in these notes):\n"
+                + json.dumps(plan, ensure_ascii=False, default=str)
+            )
+        # The tool-using OLMo agent decides whether clarification is genuinely
+        # required. A preliminary planner must not block a clear live-data request.
         answer = await run_mcp_question(
             llm, manager, state["question"],
             conversation_context=context,
