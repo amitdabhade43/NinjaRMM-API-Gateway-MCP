@@ -100,3 +100,16 @@ def test_device_details_rejects_unrelated_item_endpoint():
         assert False, "Device details must not execute an organization endpoint"
     except RuntimeError as exc:
         assert "no matching item get endpoint" in str(exc).casefold()
+
+
+def test_systems_alias_uses_ninjaone_device_collection():
+    from ninjaone_agent.planner import normalize_entity
+    task = {"entity": normalize_entity("systems"), "operation": "count", "identifier": None}
+    candidates = [
+        {"endpoint": "GET /v2/organization/documents", "path": "/v2/organization/documents"},
+        {"endpoint": "GET /v2/devices", "path": "/v2/devices"},
+    ]
+    selected = choose_candidate(candidates, {"mode": "local_semantic", "selected": [
+        {"endpoint": "GET /v2/organization/documents", "purpose": "organization documents"}
+    ]}, task)
+    assert selected["endpoint"] == "GET /v2/devices"
