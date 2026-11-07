@@ -403,7 +403,7 @@ async def run_mcp_question(
             "CONVERSATION CONTEXT (may be empty):\n" + (conversation_context or "None") +
             "\n\nCURRENT USER REQUEST:\n" + question +
             "\n\nAVAILABLE TOOLS:\n" + json.dumps(tool_catalog, ensure_ascii=False) +
-            "\n\nPREVIOUS TOOL RESULTS:\n" + json.dumps(history, ensure_ascii=False, default=str) +
+            "\n\nPREVIOUS TOOL RESULTS (use only relevant fields; do not repeat large results):\n" + json.dumps(history, ensure_ascii=False, default=str) +
             f"\n\nChoose the next action. This is step {step + 1} of {max_steps}."
         )
         decision = await llm.complete_json(system, prompt)
