@@ -113,3 +113,66 @@ def test_loop_blocks_non_get_ninjaone_endpoint():
     with pytest.raises(PermissionError, match="GET"):
         asyncio.run(run_mcp_question(llm, manager, "Create a device"))
     assert manager.calls == []
+
+
+
+def test_loop_normalizes_singular_action_and_fills_missing_intent():
+    manager = FakeManager()
+    llm = FakeLLM([
+        {
+            "action": "discover_endpoint",
+            "tool": "ninjaone.discover_endpoints",
+            "arguments": {},
+        },
+        {"action": "final", "answer": "Discovery completed."},
+    ])
+
+    answer = asyncio.run(
+        run_mcp_question(llm, manager, "Show devices beginning with 2QN")
+    )
+
+    assert answer == "Discovery completed."
+    assert manager.calls == [
+        ("ninjaone.discover_endpoints", {"intent": "Show devices beginning with 2QN"})
+    ]
+
+
+def test_loop_routes_get_planning_action_to_discovery_when_tool_is_missing():
+    manager = FakeManager()
+    llm = FakeLLM([
+        {
+            "action": "get",
+            "endpoint": "GET /v2/inventory",
+            "description": "Fetch software inventory",
+            "operation": "getInventory",
+        },
+        {"action": "final", "answer": "Discovery completed."},
+    ])
+
+    answer = asyncio.run(
+        run_mcp_question(llm, manager, "Find machines with names ending in 001")
+    )
+
+    assert answer == "Discovery completed."
+    assert manager.calls == [
+        ("ninjaone.discover_endpoints", {"intent": "Find machines with names ending in 001"})
+    ]
+
+
+def test_loop_accepts_approved_tool_field_even_when_action_is_not_call():
+    manager = FakeManager()
+    llm = FakeLLM([
+        {
+            "action": "discover_endpoint",
+            "tool": "ninjaone.discover_endpoints",
+            "arguments": {"intent": "list devices"},
+        },
+        {"action": "final", "answer": "Discovery completed."},
+    ])
+
+    answer = asyncio.run(run_mcp_question(llm, manager, "List devices"))
+
+    assert answer == "Discovery completed."
+    assert manager.calls == [
+        ("ninjaone.discover_endpoints", {"intent": "list devices"})
+    ]
