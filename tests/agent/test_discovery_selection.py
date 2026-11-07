@@ -124,3 +124,12 @@ def test_end_user_access_count_selects_end_user_collection_not_devices():
         {"endpoint": "GET /v2/devices", "purpose": "device inventory"}
     ]}, {"entity": "end-users", "operation": "count", "identifier": None, "filters": []})
     assert selected["endpoint"] == "GET /v2/user/end-users"
+
+
+def test_details_collection_falls_back_to_standard_devices_endpoint():
+    candidates = [
+        {"endpoint": "GET /v2/devices", "path": "/v2/devices"},
+    ]
+    selected = choose_candidate(candidates, {"mode": "fuzzy_fallback", "selected": []},
+                                {"entity": "devices", "operation": "details", "identifier": None})
+    assert selected["endpoint"] == "GET /v2/devices"
