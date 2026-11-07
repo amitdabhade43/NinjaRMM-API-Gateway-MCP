@@ -16,10 +16,10 @@ _OPERATOR_ALIASES = {
     "eq": "equals", "equal": "equals", "is": "equals", "exact": "equals",
     "exactly": "equals", "matches": "equals", "match": "equals",
     "ne": "not_equals", "neq": "not_equals", "is_not": "not_equals",
-    "does_not_equal": "not_equals",
+    "does_not_equal": "not_equals", "not_equal": "not_equals", "not_equal_to": "not_equals",
     "includes": "contains", "include": "contains", "has": "contains",
     "having": "contains", "containing": "contains", "matches_text": "contains",
-    "not_contains": "not_contains", "does_not_contain": "not_contains",
+    "not_contains": "not_contains", "does_not_contain": "not_contains", "not_contain": "not_contains",
     "excludes": "not_contains", "without": "not_contains",
     "prefix": "starts_with", "begins": "starts_with",
     "begin_with": "starts_with", "begins_with": "starts_with",
@@ -83,7 +83,7 @@ def _compare(actual: Any, operator: str, expected: Any) -> bool:
     if operator == "is_not_empty":
         return not _compare(actual, "is_empty", None)
     if actual is None:
-        return operator == "not_equals" and expected is not None
+        return operator in {"not_equals", "not_contains", "not_in"} and expected is not None
 
     if operator in {"equals", "not_equals"}:
         if isinstance(actual, str) or isinstance(expected, str):
