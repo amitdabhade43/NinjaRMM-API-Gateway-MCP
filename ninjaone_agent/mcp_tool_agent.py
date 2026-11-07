@@ -63,8 +63,23 @@ def validate_tool_arguments(tool: MCPToolInfo, arguments: Any) -> dict[str, Any]
     return arguments
 
 
-async def run_mcp_question(llm: LocalLLM, manager: MultiMCPManager, question: str) -> str:
-    shortlist = rank_tools(question, manager.list_tools())
+async def run_mcp_question(
+    llm: LocalLLM,
+    manager: MultiMCPManager,
+    question: str,
+    max_steps: int = 4,
+) -> str:
+    """Run a bounded discover/inspect/execute loop over safe MCP tools."""
+    all_tools = manager.list_tools()
+    shortlist = rank_tools(question, all_tools)
+    # The NinjaOne Gateway exposes a small set of workflow tools. Keep those
+    # available together so OLMo can discover, inspect, then execute an API.
+    for item in all_tools:
+        if item.server.casefold() == "ninjaone" and is_read_only_candidate(item):
+            if item not in shortlist:
+                shortlist.append(item)
+    shortlist = shortlist[:max(16, len(shortlist))]
+
     if not shortlist:
         return "I couldn't find a suitable read-only MCP tool for that request."
 
@@ -74,43 +89,73 @@ async def run_mcp_question(llm: LocalLLM, manager: MultiMCPManager, question: st
         "input_schema": item.input_schema,
     } for item in shortlist]
     system = (
-        "You select one read-only MCP tool for the user's request. "
-        "Use only the supplied tool catalog. Never invent tool names or arguments. "
-        "Return one JSON object only: "
-        '{"tool":"server.tool_name","arguments":{}}. '
-        "If no tool is suitable, return {\"tool\":null,\"arguments\":{}}. "
-        "Do not select write, update, create, delete, or action tools."
+        "You are a careful MCP tool-using agent. You may call one supplied tool "
+        "per step, or return a final answer. Use only the exact tool names and "
+        "argument schemas supplied. Never invent endpoint names, parameters, "
+        "records, or results. First discover an API operation when needed, "
+        "inspect its schema before execution when parameters are not clear, "
+        "then execute only a GET operation. Never call write, create, update, "
+        "delete, raw-request, or action tools. Return JSON only in one of these "
+        "forms: {\"action\":\"call\",\"tool\":\"server.tool\","
+        "\"arguments\":{}} or {\"action\":\"final\",\"answer\":\"...\"}. "
+        "Do not repeat a tool call with identical arguments."
     )
-    selection = await llm.complete_json(
-        system,
-        "USER REQUEST:\n" + question + "\n\nAVAILABLE TOOLS:\n" +
-        json.dumps(tool_catalog, ensure_ascii=False),
-    )
-    selected_name = selection.get("tool")
-    selected = next((item for item in shortlist
-                     if item.qualified_name == selected_name), None)
-    if selected is None:
-        return "I couldn't select a valid read-only MCP tool for that request."
+    history: list[dict[str, Any]] = []
+    seen_calls: set[str] = set()
 
-    arguments = validate_tool_arguments(selected, selection.get("arguments", {}))
-    # The NinjaOne Gateway's generic endpoint executor can reach write
-    # operations too. Require a concrete GET endpoint before invoking it.
-    if selected.server.casefold() == "ninjaone" and selected.name in {
-        "execute_endpoint", "execute_paginated_endpoint"
-    }:
-        endpoint = arguments.get("endpoint")
-        if not isinstance(endpoint, str) or not endpoint.lstrip().upper().startswith("GET "):
-            raise PermissionError("Only explicitly discovered GET endpoints may be executed.")
-    result = await manager.call_tool(selected.qualified_name, arguments)
-    result_text = json.dumps(result, ensure_ascii=False, default=str)[:18000]
-    response_system = (
-        "Answer the user's request using only the MCP result below. "
-        "Do not invent records, counts, or facts. If the result is incomplete or "
-        "does not contain the requested information, say so clearly. Be concise."
+    for step in range(max(1, min(max_steps, 6))):
+        prompt = (
+            "USER REQUEST:\\n" + question +
+            "\\n\\nAVAILABLE TOOLS:\\n" + json.dumps(tool_catalog, ensure_ascii=False) +
+            "\\n\\nPREVIOUS TOOL RESULTS:\\n" + json.dumps(history, ensure_ascii=False, default=str) +
+            f"\\n\\nChoose the next action. This is step {step + 1} of {max_steps}."
+        )
+        decision = await llm.complete_json(system, prompt)
+        if decision.get("action") == "final":
+            answer = decision.get("answer")
+            if isinstance(answer, str) and answer.strip():
+                return answer.strip()
+            return "The agent did not provide a valid final answer."
+
+        if decision.get("action") != "call":
+            return "OLMo returned an invalid action. No MCP tool was executed."
+
+        name = decision.get("tool")
+        selected = next((item for item in shortlist if item.qualified_name == name), None)
+        if selected is None:
+            return "OLMo selected a tool that was not in the approved tool shortlist."
+
+        arguments = validate_tool_arguments(selected, decision.get("arguments", {}))
+        call_key = selected.qualified_name + ":" + json.dumps(arguments, sort_keys=True, default=str)
+        if call_key in seen_calls:
+            return "The agent attempted to repeat the same tool call. Stopping safely."
+        seen_calls.add(call_key)
+
+        if selected.server.casefold() == "ninjaone":
+            if selected.name == "execute_raw_request":
+                raise PermissionError("Raw NinjaOne requests are not permitted in generic mode.")
+            if selected.name in {"execute_endpoint", "execute_paginated_endpoint"}:
+                endpoint = arguments.get("endpoint")
+                if not isinstance(endpoint, str) or not endpoint.lstrip().upper().startswith("GET "):
+                    raise PermissionError("Only explicitly discovered GET endpoints may be executed.")
+
+        result = await manager.call_tool(selected.qualified_name, arguments)
+        history.append({
+            "tool": selected.qualified_name,
+            "arguments": arguments,
+            "result": result,
+        })
+        # Keep the context bounded for local inference.
+        history = history[-4:]
+
+    final_system = (
+        "Answer the user's request using only the MCP tool results below. "
+        "Do not invent facts, counts, or records. If the available results do "
+        "not fully answer the request, say what is missing."
     )
     return await llm.complete(
-        response_system,
-        "USER REQUEST:\n" + question + "\n\nTOOL:\n" +
-        selected.qualified_name + "\n\nVERIFIED TOOL RESULT:\n" + result_text,
+        final_system,
+        "USER REQUEST:\\n" + question + "\\n\\nMCP TOOL RESULTS:\\n" +
+        json.dumps(history, ensure_ascii=False, default=str)[:18000],
         temperature=0.1,
     )
