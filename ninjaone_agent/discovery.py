@@ -24,6 +24,10 @@ def _is_device_collection(candidate: dict[str, Any], operation: str) -> bool:
     return any(path.endswith(suffix) for suffix in allowed)
 
 
+def _is_device_item(candidate: dict[str, Any]) -> bool:
+    return _has_path_parameters(candidate) and "/device" in _candidate_path(candidate).casefold()
+
+
 def choose_candidate(candidates: list[dict[str, Any]], semantic: dict[str, Any],
                      task: dict[str, Any]) -> dict[str, Any]:
     selected_items = semantic.get("selected", []) if isinstance(semantic, dict) else []
@@ -32,23 +36,25 @@ def choose_candidate(candidates: list[dict[str, Any]], semantic: dict[str, Any],
     selected_pool = [item for key in selected_keys for item in candidates
                      if item.get("endpoint") == key]
     wants_item = task.get("identifier") is not None
+    entity = str(task.get("entity", "")).casefold()
 
     if wants_item:
         item_pool = [item for item in candidates if _has_path_parameters(item)]
-        preferred = [item for item in selected_pool if _has_path_parameters(item)]
+        if "device" in entity:
+            item_pool = [item for item in item_pool if _is_device_item(item)]
+        preferred = [item for item in selected_pool if item in item_pool]
         pool = preferred or item_pool
         if pool:
             return pool[0]
-        raise RuntimeError("No item GET endpoint was discovered for the supplied identifier.")
+        raise RuntimeError("No matching item GET endpoint was discovered for the supplied identifier.")
 
     collection_pool = [item for item in candidates if not _has_path_parameters(item)]
     if not collection_pool:
         raise RuntimeError("No collection GET endpoint was discovered; an item-detail endpoint cannot answer an unscoped request.")
 
-    entity = str(task.get("entity", "")).casefold()
     if "device" in entity:
-        # This is a provider-specific rule. Never execute an unrelated semantic
-        # match (for example organization documents) for a device inventory task.
+        # Never execute an unrelated semantic match (e.g. organization documents)
+        # for a device inventory request.
         exact = [item for item in collection_pool if _is_device_collection(item, task.get("operation", "list"))]
         if exact:
             return exact[0]
@@ -74,9 +80,13 @@ async def discover_for_task(gateway: GatewayConnection, config: AgentConfig,
 
     # Semantic endpoint search can rank an unrelated collection first. Retry
     # with an entity-specific query before failing safely.
-    if "device" in str(task.get("entity", "")).casefold() and not any(
-        _is_device_collection(item, task.get("operation", "list")) for item in candidates
-    ):
+    entity_is_device = "device" in str(task.get("entity", "")).casefold()
+    has_matching_route = any(
+        _is_device_item(item) if task.get("identifier") is not None
+        else _is_device_collection(item, task.get("operation", "list"))
+        for item in candidates
+    )
+    if entity_is_device and not has_matching_route:
         retry = await gateway.call("discover_endpoints", {
             "intent": "NinjaOne devices device inventory list all devices collection GET endpoint",
             "method": "GET", "candidate_limit": max(config.max_candidates, 50),
