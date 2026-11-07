@@ -50,7 +50,12 @@ async def run_generic_mcp_question(question: str) -> int:
         print("Connecting to configured MCP servers...", flush=True)
         async with MultiMCPManager(servers) as manager:
             print("Connected:", ", ".join(manager.server_status()["connected"]), flush=True)
-            answer = await run_mcp_question(llm, manager, question)
+            answer = await run_agent_workflow(
+                llm, manager, question,
+                on_plan=lambda plan: print(
+                    "[PLAN] " + json.dumps(plan, ensure_ascii=False), flush=True
+                ),
+            )
         print("\nResult\n------", flush=True)
         print(answer, flush=True)
         return 0
