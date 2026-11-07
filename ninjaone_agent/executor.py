@@ -6,15 +6,15 @@ from typing import Any, Callable
 from .config import AgentConfig
 from .discovery import discover_for_task
 from .mcp_gateway import GatewayConnection
-from .result_processor import extract_records, process_result
+from .result_processor import extract_records, is_truncated, process_result
+
 
 def _schema_parameter_names(detail: dict[str, Any], location: str) -> set[str]:
     return {str(p.get("name")) for p in detail.get("parameters", [])
             if isinstance(p, dict) and p.get("in") == location}
 
+
 def _validate_parameters(task: dict[str, Any], detail: dict[str, Any]) -> tuple[dict, dict]:
-    # Parameter names are schema-owned. Only map a user-supplied identifier to
-    # the single path placeholder when the inspected endpoint requires one.
     path_params, query = {}, dict(task.get("query") or {})
     path_names, query_names = _schema_parameter_names(detail, "path"), _schema_parameter_names(detail, "query")
     template_names = set(re.findall(r"{([^}]+)}", str(detail.get("path", ""))))
@@ -23,7 +23,7 @@ def _validate_parameters(task: dict[str, Any], detail: dict[str, Any]) -> tuple[
         path_params[next(iter(template_names))] = identifier
     missing = template_names - path_params.keys()
     if missing:
-        raise ValueError("This endpoint requires a device/record ID. No ID was supplied.")
+        raise ValueError("This endpoint requires a record ID. No ID was supplied.")
     if set(path_params) - path_names:
         raise ValueError("The selected endpoint's path parameters do not match its OpenAPI schema.")
     if set(query) - query_names:
@@ -35,11 +35,13 @@ def _validate_parameters(task: dict[str, Any], detail: dict[str, Any]) -> tuple[
             raise ValueError(f"Missing required query parameter: {parameter.get('name')}")
     return path_params, query
 
+
 def _pagination_pair(detail: dict[str, Any]) -> tuple[str, str] | None:
     names = _schema_parameter_names(detail, "query")
     page = next((name for name in ("page", "pageNumber", "page_number") if name in names), None)
     size = next((name for name in ("pageSize", "page_size", "limit") if name in names), None)
     return (page, size) if page and size and page != size else None
+
 
 def _cursor_pagination(detail: dict[str, Any]) -> tuple[str, str] | None:
     parameters = [p for p in detail.get("parameters", []) if isinstance(p, dict) and p.get("in") == "query"]
@@ -52,6 +54,7 @@ def _cursor_pagination(detail: dict[str, Any]) -> tuple[str, str] | None:
         return None
     return "after", "pageSize"
 
+
 async def _execute_cursor_pages(gateway: GatewayConnection, config: AgentConfig,
                                 endpoint: str, path_params: dict,
                                 base_query: dict, cursor_names: tuple[str, str]) -> dict[str, Any]:
@@ -61,31 +64,33 @@ async def _execute_cursor_pages(gateway: GatewayConnection, config: AgentConfig,
     collected: list[Any] = []
     pages = 0
     complete = False
-    truncated = False
+    gateway_truncated = False
     for _ in range(config.max_pages):
         query = {k: v for k, v in base_query.items() if k not in {after_name, size_name}}
         query[size_name] = page_size
         if cursor is not None:
             query[after_name] = cursor
         raw = await gateway.call("execute_endpoint", {
-            "endpoint": endpoint, "path_params": path_params or None,
-            "query": query or None,
+            "endpoint": endpoint, "path_params": path_params or None, "query": query or None,
         })
         if isinstance(raw, dict) and raw.get("error"):
             return {"error": raw["error"], "complete": False,
                     "pages_fetched": pages, "items_fetched": len(collected)}
         records = extract_records(raw)
         if records is None:
-            return {"error": "The device-list response did not contain a readable record array.",
+            return {"error": "The MCP response did not contain a readable record array.",
                     "complete": False, "pages_fetched": pages,
                     "items_fetched": len(collected), "raw_response": raw}
         pages += 1
         collected.extend(records)
-        if isinstance(raw, dict) and raw.get("truncated"):
-            truncated = True
-            break
+        page_truncated = is_truncated(raw)
+        gateway_truncated = gateway_truncated or page_truncated
+
+        # A full page can still be followed by another cursor page even when
+        # the Gateway wraps it in a truncation envelope. A short truncated page
+        # cannot prove the inventory is complete.
         if len(records) < page_size:
-            complete = True
+            complete = not page_truncated
             break
         if not records or not isinstance(records[-1], dict) or records[-1].get("id") is None:
             break
@@ -95,10 +100,12 @@ async def _execute_cursor_pages(gateway: GatewayConnection, config: AgentConfig,
         cursor = next_cursor
 
     return {
-        "endpoint": endpoint, "data": collected, "complete": complete and not truncated,
-        "truncated": truncated, "pages_fetched": pages, "items_fetched": len(collected),
-        "max_pages_reached": not complete and not truncated and pages >= config.max_pages,
+        "endpoint": endpoint, "data": collected,
+        "complete": complete, "truncated": gateway_truncated and not complete,
+        "pages_fetched": pages, "items_fetched": len(collected),
+        "max_pages_reached": not complete and pages >= config.max_pages,
     }
+
 
 async def execute_task(gateway: GatewayConnection, config: AgentConfig,
                        task: dict[str, Any]) -> dict[str, Any]:
@@ -109,9 +116,7 @@ async def execute_task(gateway: GatewayConnection, config: AgentConfig,
         if operation in {"count", "list", "list_and_count", "details", "summary"}:
             cursor_pagination = _cursor_pagination(detail)
             if cursor_pagination:
-                raw = await _execute_cursor_pages(
-                    gateway, config, endpoint, path_params, query, cursor_pagination
-                )
+                raw = await _execute_cursor_pages(gateway, config, endpoint, path_params, query, cursor_pagination)
                 return process_result(task, raw)
             pagination = _pagination_pair(detail)
             if pagination and operation in {"count", "list", "list_and_count"}:
@@ -123,17 +128,16 @@ async def execute_task(gateway: GatewayConnection, config: AgentConfig,
                 })
             else:
                 raw = await gateway.call("execute_endpoint", {
-                    "endpoint": endpoint, "path_params": path_params or None,
-                    "query": query or None,
+                    "endpoint": endpoint, "path_params": path_params or None, "query": query or None,
                 })
         else:
             raw = await gateway.call("execute_endpoint", {
-                "endpoint": endpoint, "path_params": path_params or None,
-                "query": query or None,
+                "endpoint": endpoint, "path_params": path_params or None, "query": query or None,
             })
         return process_result(task, raw)
     except Exception as exc:
         return {"task": task, "status": "error", "error": str(exc)}
+
 
 async def execute_plan(gateway: GatewayConnection, config: AgentConfig,
                        plan: dict[str, Any],
