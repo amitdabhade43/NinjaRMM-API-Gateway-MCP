@@ -17,7 +17,7 @@ class AgentConfig:
     mcp_command: str
     mcp_args: tuple[str, ...]
     max_candidates: int = 30
-    max_pages: int = 10
+    max_pages: int = 100
     page_size: int = 100
     request_timeout: float = 45.0
 
@@ -30,7 +30,9 @@ class AgentConfig:
             mcp_command=os.getenv("NINJA_AGENT_MCP_COMMAND", sys.executable),
             mcp_args=tuple(os.getenv("NINJA_AGENT_MCP_ARGS", "-m ninja_mcp").split()),
             max_candidates=max(1, int(os.getenv("NINJA_AGENT_MAX_CANDIDATES", "30"))),
-            max_pages=max(1, min(20, int(os.getenv("NINJA_AGENT_MAX_PAGES", "10")))),
+            # 100 pages x 50 device records supports inventories up to 5,000
+            # records before returning an explicit partial result.
+            max_pages=max(1, min(500, int(os.getenv("NINJA_AGENT_MAX_PAGES", "100")))),
             page_size=max(1, min(200, int(os.getenv("NINJA_AGENT_PAGE_SIZE", "100")))),
             request_timeout=float(os.getenv("NINJA_AGENT_TIMEOUT", "45")),
         )
