@@ -24,6 +24,22 @@ Optional settings:
 
 The NinjaOne device API uses cursor pagination with `after` and `pageSize`; the agent requests 50 records per page and follows the last record ID. The default cap is 1,000 pages (up to 50,000 records), after which it reports an explicit partial result rather than inventing a total. The final short or empty page is fetched to confirm completion, including when the total is an exact multiple of 50.
 
+## Multiple MCP servers (Stage 1)
+
+The agent now includes a generic MCP connection registry for multiple stdio servers. The default configuration remains the existing NinjaOne Gateway.
+
+To inspect the tools exposed by configured servers without executing them:
+
+    .\\.venv\\Scripts\\python.exe .\\ninjaone_agent.py --list-mcp-tools
+
+To add more MCP servers, set `NINJA_AGENT_MCP_SERVERS_JSON` in the process environment or repository-root `.env`. Example:
+
+    NINJA_AGENT_MCP_SERVERS_JSON=[{"name":"ninjaone","command":"C:\\project\\NinjaRMM-API-Gateway-MCP\\.venv\\Scripts\\python.exe","args":["-m","ninja_mcp"]},{"name":"filesystem","command":"node","args":["C:\\mcp\\filesystem\\server.js"],"env":{"FILESYSTEM_ROOT":"C:\\Data"}}]
+
+Each server name must be unique. Tools are registered with server-qualified names such as `ninjaone.list_devices` and `filesystem.read_file`, so identical tool names from different servers do not collide. If one server fails to connect, the registry reports that server as unavailable and continues connecting to the others.
+
+Stage 1 is discovery-only: `--list-mcp-tools` lists tool names, descriptions and input schemas. It does not execute tools. The existing NinjaOne question workflow remains unchanged in this stage.
+
 ## Run
 
 Interactive:
