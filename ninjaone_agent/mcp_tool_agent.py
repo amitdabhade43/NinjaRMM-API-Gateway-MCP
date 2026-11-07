@@ -334,10 +334,18 @@ async def run_mcp_question(
     # Present only the seven compatibility tools to OLMo. The original
     # Gateway tools remain registered and available, but duplicate aliases
     # are not added to the model's decision prompt.
+    has_compat_surface = any(
+        item.server.casefold() == "ninjaone"
+        and item.name in _NINJAONE_COMPAT_TOOLS
+        for item in all_tools
+    )
     agent_tools = [
         item for item in all_tools
-        if item.server.casefold() != "ninjaone"
-        or item.name in _NINJAONE_COMPAT_TOOLS
+        if (
+            item.server.casefold() != "ninjaone"
+            or not has_compat_surface
+            or item.name in _NINJAONE_COMPAT_TOOLS
+        )
     ]
     shortlist = rank_tools(question, agent_tools)
     for item in agent_tools:
