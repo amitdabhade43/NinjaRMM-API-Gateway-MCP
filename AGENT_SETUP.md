@@ -25,7 +25,7 @@ Optional agent settings:
     NINJA_AGENT_MCP_ARGS=-m ninja_mcp
     NINJA_AGENT_MAX_CANDIDATES=30
     NINJA_AGENT_MAX_PAGES=10
-    NINJA_AGENT_PAGE_SIZE=100
+    NINJA_AGENT_PAGE_SIZE=100  # Device cursor requests are safely capped at 50 records per page
 
 The defaults match the previously tested local OLMo model and the gateway launched from the same Python environment. The gateway continues to load NinjaOne credentials from the existing .env. Do not commit .env.
 
@@ -47,4 +47,4 @@ The agent exposes only discover_endpoints, inspect_endpoint, execute_endpoint an
 
     .\.venv\Scripts\python.exe -m pytest tests/agent -q
 
-Planner output is validated before use. API paths are always selected from Gateway discovery results and inspected against the OpenAPI schema. Python applies requested filters and counts, and preserves Gateway completeness metadata.
+Planner output is validated before use. API paths are always selected from Gateway discovery results and inspected against the OpenAPI schema. Device name matching checks displayName, systemName, dnsName, netbiosName and other common name fields. Device inventory uses NinjaOne's documented after + pageSize cursor pagination. The agent never reports a partial zero as a confirmed 'no matches' result; it clearly states how many records/pages were checked and whether the search completed.
