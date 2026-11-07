@@ -17,7 +17,7 @@ _OPERATION_WORDS = {
     "view", "details", "detail", "status", "installed", "missing", "failed",
     "offline", "online", "active", "inactive", "whose", "starting", "starts",
     "beginning", "ending", "ends", "assigned", "belonging", "older", "newer",
-    "all", "every", "which",
+    "all", "every", "which", "how", "many", "number", "total",
 }
 _GREETING_ONLY = re.compile(
     r"^(hi|hello|hey|good morning|good afternoon|good evening|thanks|thank you|"
