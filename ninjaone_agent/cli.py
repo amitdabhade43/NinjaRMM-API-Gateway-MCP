@@ -20,9 +20,9 @@ async def list_mcp_tools() -> int:
         status = manager.server_status()
         print("MCP server status", flush=True)
         print(json.dumps(status, indent=2), flush=True)
-        print("\\nDiscovered tools", flush=True)
+        print("\nDiscovered tools", flush=True)
         for tool in manager.list_tools():
-            print(f"\\n[{tool.qualified_name}] {tool.description}", flush=True)
+            print(f"\n[{tool.qualified_name}] {tool.description}", flush=True)
             print(json.dumps(tool.input_schema, ensure_ascii=False), flush=True)
     return 0
 
