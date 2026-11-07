@@ -61,6 +61,25 @@ def test_bounded_loop_discovers_inspects_and_executes_get():
     ]
 
 
+def test_loop_normalizes_tool_name_returned_as_action():
+    manager = FakeManager()
+    llm = FakeLLM([
+        {
+            "action": "discover_endpoints",
+            "tool": "ninjaone.discover_endpoints",
+            "arguments": {"intent": "Find devices starting with 2QN"},
+        },
+        {"action": "final", "answer": "Endpoint discovery completed."},
+    ])
+
+    answer = asyncio.run(run_mcp_question(llm, manager, "Find devices starting with 2QN"))
+
+    assert answer == "Endpoint discovery completed."
+    assert manager.calls == [
+        ("ninjaone.discover_endpoints", {"intent": "Find devices starting with 2QN"})
+    ]
+
+
 def test_loop_blocks_non_get_ninjaone_endpoint():
     manager = FakeManager()
     llm = FakeLLM([
