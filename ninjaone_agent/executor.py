@@ -44,23 +44,30 @@ def _pagination_pair(detail: dict[str, Any]) -> tuple[str, str] | None:
 
 
 def _cursor_pagination(detail: dict[str, Any]) -> tuple[str, str] | None:
-    parameters = [p for p in detail.get("parameters", []) if isinstance(p, dict) and p.get("in") == "query"]
-    after = next((p for p in parameters if p.get("name") == "after"), None)
-    size = next((p for p in parameters if p.get("name") == "pageSize"), None)
-    if not after or not size:
-        return None
-    description = str(after.get("description", "")).casefold()
-    if "previous page" not in description and "last node id" not in description:
-        return None
-    return "after", "pageSize"
+    """Recognize NinjaOne's documented device cursor parameters from the inspected schema.
+
+    The old implementation depended on exact wording in the OpenAPI description.
+    Description wording is not a reliable machine-readable contract; parameter
+    names and their declared query location are the stable schema identifiers.
+    """
+    parameters = [p for p in detail.get("parameters", [])
+                  if isinstance(p, dict) and p.get("in") == "query"]
+    by_name = {str(p.get("name", "")).casefold(): str(p.get("name", ""))
+               for p in parameters}
+    after_name, size_name = by_name.get("after"), by_name.get("pagesize")
+    if after_name and size_name:
+        return after_name, size_name
+    return None
 
 
 async def _execute_cursor_pages(gateway: GatewayConnection, config: AgentConfig,
                                 endpoint: str, path_params: dict,
                                 base_query: dict, cursor_names: tuple[str, str]) -> dict[str, Any]:
     after_name, size_name = cursor_names
+    # NinjaOne device inventory uses an ID cursor and a maximum page size of 50.
     page_size = min(config.page_size, 50)
     cursor = None
+    seen_cursors: set[str] = set()
     collected: list[Any] = []
     pages = 0
     complete = False
@@ -86,17 +93,18 @@ async def _execute_cursor_pages(gateway: GatewayConnection, config: AgentConfig,
         page_truncated = is_truncated(raw)
         gateway_truncated = gateway_truncated or page_truncated
 
-        # A full page can still be followed by another cursor page even when
-        # the Gateway wraps it in a truncation envelope. A short truncated page
-        # cannot prove the inventory is complete.
+        # A short, non-truncated page (including an empty page after an exact
+        # multiple of 50) is the API's completion signal.
         if len(records) < page_size:
             complete = not page_truncated
             break
         if not records or not isinstance(records[-1], dict) or records[-1].get("id") is None:
             break
         next_cursor = records[-1]["id"]
-        if cursor is not None and str(next_cursor) == str(cursor):
+        cursor_key = str(next_cursor)
+        if cursor_key in seen_cursors:
             break
+        seen_cursors.add(cursor_key)
         cursor = next_cursor
 
     return {
@@ -124,7 +132,7 @@ async def execute_task(gateway: GatewayConnection, config: AgentConfig,
                     "endpoint": endpoint, "path_params": path_params or None,
                     "query": query or None, "page_parameter": pagination[0],
                     "page_size_parameter": pagination[1], "page_size": config.page_size,
-                    "start_page": 1, "max_pages": config.max_pages,
+                    "start_page": 1, "max_pages": min(config.max_pages, 20),
                 })
             else:
                 raw = await gateway.call("execute_endpoint", {
