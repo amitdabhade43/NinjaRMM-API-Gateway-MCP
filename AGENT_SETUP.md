@@ -46,7 +46,7 @@ Examples:
 
     You: Show me all devices
     [MCP] Connecting to NinjaOne Gateway...
-    [MCP] Connected: ninjaone (12 tools discovered)
+    [MCP] Connected: ninjaone (7 tools discovered)
     [MCP] Working...
     Assistant: ...
 
@@ -57,7 +57,7 @@ The router is intentionally lightweight and deterministic. It uses NinjaOne reso
 
 ## MCP tool access and safety
 
-The Gateway exposes the original five workflow tools plus seven compatibility tools inspired by the reference repository:
+The MCP server exposes exactly seven compatibility tools. The original five Gateway functions remain internal Python functions and are not advertised to the agent:
 
 | Compatibility tool | Purpose |
 |---|---|
@@ -69,11 +69,11 @@ The Gateway exposes the original five workflow tools plus seven compatibility to
 | `memory_list` | List saved query templates |
 | `memory_delete` | Delete a saved query template |
 
-The original `discover_endpoints`, `inspect_endpoint`, `execute_endpoint`, `execute_paginated_endpoint` and `execute_raw_request` tools remain available. The compatibility tools are thin aliases over the same OpenAPI-driven Gateway; they do not add endpoint coverage or create a second API client.
+The seven tools are thin aliases over the same OpenAPI-driven Gateway; they do not add endpoint coverage or create a second API client.
 
-The OLMo agent may execute only GET requests against the NinjaOne tenant. Both `call` and `raw_call` are subject to that rule. Saved-query memory is local to the machine (default: `~/.ninjaone_agent/saved_queries.json`) and stores only the endpoint plus path/query parameters and a description—not tenant response data or credentials. Saving or deleting a template requires explicit user wording.
+GET requests execute automatically. POST, PUT and PATCH require an explicit `YES` confirmation in interactive mode; the exact operation and request body are displayed first. DELETE remains permanently blocked. Saved-query memory is local to the machine (default: `~/.ninjaone_agent/saved_queries.json`) and stores only the endpoint plus path/query parameters and a description—not tenant response data or credentials. Saving or deleting a template requires explicit user wording.
 
-The Gateway remains the final authority for method, schema and approval checks. POST, PUT and PATCH still require a trusted, short-lived human approval token; DELETE remains blocked. We are not weakening these existing protections as part of the functionality work.
+TEMPORARY DEVELOPMENT MODE: set `NINJA_MCP_DEV_ALLOW_WRITES=true` in the local `.env` to allow the interactive confirmation flow to execute POST/PUT/PATCH without the external approval service. This is intentionally a temporary relaxation for functionality testing. Do not expose this MCP server to untrusted clients or a network while enabled. DELETE remains blocked in the Gateway. Remove this setting and restore the trusted approval service before production.
 
 For additional configured MCP servers, the default policy allows tools whose names use read-style prefixes such as `get_`, `list_`, `search_`, `read_`, `inspect_` and `fetch_`. Review each server's permissions before connecting write-capable tools.
 
