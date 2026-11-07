@@ -33,7 +33,7 @@ def _requested_user_access_name(question: str) -> str | None:
             name = re.sub(r"\b(?:user|end user|in ninjaone|in ninjarmm)\b", " ", match.group(1), flags=re.I)
             name = re.sub(r"[^\w.@' -]", " ", name).strip(" .?!,")
             name = re.sub(r"\s+", " ", name)
-            if len(name.split()) >= 2 and len(name) <= 100:
+            if len(name.split()) >= 1 and len(name) <= 100:
                 return name
     return None
 
