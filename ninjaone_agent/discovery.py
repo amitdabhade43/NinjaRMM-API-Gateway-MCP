@@ -18,12 +18,8 @@ def choose_candidate(candidates: list[dict[str, Any]], semantic: dict[str, Any],
                      for item in selected_items]
     selected_pool = [item for key in selected_keys for item in candidates
                      if item.get("endpoint") == key]
-    mode = semantic.get("mode") if isinstance(semantic, dict) else None
     wants_item = task.get("identifier") is not None
 
-    # An item route is valid only when the user supplied an identifier.
-    # For name/status searches, always choose a collection route, even when
-    # semantic discovery ranks an /{id} route first.
     if wants_item:
         item_pool = [item for item in candidates if _has_path_parameters(item)]
         preferred = [item for item in selected_pool if _has_path_parameters(item)]
@@ -33,14 +29,31 @@ def choose_candidate(candidates: list[dict[str, Any]], semantic: dict[str, Any],
         raise RuntimeError("No item GET endpoint was discovered for the supplied identifier.")
 
     collection_pool = [item for item in candidates if not _has_path_parameters(item)]
-    preferred = [item for item in selected_pool if not _has_path_parameters(item)]
-    pool = preferred or collection_pool
-    if pool:
-        return pool[0]
-    raise RuntimeError(
-        "No unscoped collection GET endpoint was discovered. "
-        "Refusing to call an item endpoint because this request has no device ID."
+    if not collection_pool:
+        raise RuntimeError(
+            "No collection GET endpoint was discovered. A device ID is required for item-detail endpoints."
+        )
+
+    entity = str(task.get("entity", "")).casefold()
+    has_name_prefix = any(
+        f.get("field", "").casefold() in {"name", "displayname", "systemname", "hostname"}
+        and f.get("operator") == "startswith"
+        for f in task.get("filters", [])
     )
+    if "device" in entity:
+        # Prefix matching is performed locally against the documented device-name
+        # fields. Do not choose /devices/search and treat its broad q search as
+        # an exact starts-with filter.
+        preferred_path = "/devices-detailed" if task.get("operation") == "details" else "/devices"
+        exact = [item for item in collection_pool
+                 if str(item.get("path", item.get("endpoint", ""))).rstrip("/").endswith(preferred_path)]
+        if exact:
+            return exact[0]
+
+    preferred = [item for item in selected_pool if not _has_path_parameters(item)]
+    if preferred:
+        return preferred[0]
+    return collection_pool[0]
 
 
 async def discover_for_task(gateway: GatewayConnection, config: AgentConfig,
