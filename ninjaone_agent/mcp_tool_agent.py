@@ -66,7 +66,7 @@ def _simple_count_resource(question: str) -> str | None:
 
 def _simple_name_resource(question: str) -> str | None:
     """Detect a plain request for resource names, including minor spelling errors."""
-    if not re.search(r"\\bname(?:s)?\\b", question, re.I):
+    if not re.search(r"\bname(?:s)?\b", question, re.I):
         return None
 
     words = set(_WORDS.findall(question.casefold()))
@@ -295,7 +295,7 @@ async def _fast_names_with_compat_tools(
     output.append(f"Total: {len(records)} {resource}")
     if isinstance(result, dict) and (result.get("truncated") or result.get("complete") is False):
         output.append("Note: the API response was incomplete; additional records may exist.")
-    return "\\n".join(output)
+    return "\n".join(output)
 \n\ndef is_read_only_candidate(tool: MCPToolInfo) -> bool:
     if tool.server.casefold() == "ninjaone":
         return tool.name in _NINJAONE_SAFE_TOOLS
