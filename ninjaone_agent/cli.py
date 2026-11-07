@@ -139,8 +139,17 @@ async def run_chat_session() -> int:
                         )
                     context = format_conversation_context(history)
                     print("[MCP] Working...", flush=True)
+                    def confirm_write(operation: str, body):
+                        print("\n[CONFIRMATION REQUIRED] NinjaOne write operation:", flush=True)
+                        print(operation, flush=True)
+                        if body is not None:
+                            print("Request body:", json.dumps(body, ensure_ascii=False, indent=2), flush=True)
+                        reply = input("Type YES to execute this exact request (anything else cancels): ").strip()
+                        return reply == "YES"
+
                     answer = await run_mcp_question(
-                        llm, manager, question, conversation_context=context
+                        llm, manager, question, conversation_context=context,
+                        approval_callback=confirm_write,
                     )
                     previous_mode = "mcp"
                 else:
