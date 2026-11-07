@@ -243,10 +243,23 @@ async def run_mcp_question(
                     continue
                 normalized = dict(item)
                 if "operator" in normalized:
-                    normalized["operator"] = normalize_operator(normalized["operator"])
+                    try:
+                        normalized["operator"] = normalize_operator(normalized["operator"])
+                    except ValueError as exc:
+                        history.append({
+                            "filter_error": str(exc),
+                            "hint": "Use one of the supported canonical filter operators.",
+                        })
+                        history = history[-4:]
+                        normalized_filters = []
+                        break
                 normalized_filters.append(normalized)
             if normalized_filters:
                 active_filters = normalized_filters
+            elif proposed_filters:
+                # Ask the model to repair an unsupported filter before making
+                # a data request that could otherwise return misleading results.
+                continue
 
         action, selected, normalized_arguments = _normalize_decision(
             decision, shortlist, question
