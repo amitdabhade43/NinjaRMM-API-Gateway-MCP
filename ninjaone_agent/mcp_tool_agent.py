@@ -307,7 +307,9 @@ async def _fast_names_with_compat_tools(
     if isinstance(result, dict) and (result.get("truncated") or result.get("complete") is False):
         output.append("Note: the API response was incomplete; additional records may exist.")
     return "\n".join(output)
-\n\ndef is_read_only_candidate(tool: MCPToolInfo) -> bool:
+
+
+def is_read_only_candidate(tool: MCPToolInfo) -> bool:
     if tool.server.casefold() == "ninjaone":
         return tool.name in _NINJAONE_SAFE_TOOLS
     return tool.name.casefold().startswith(_READ_PREFIXES)
