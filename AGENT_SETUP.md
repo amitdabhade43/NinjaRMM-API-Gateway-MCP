@@ -69,3 +69,9 @@ The generic selector can choose and invoke one relevant read-only tool from the 
 This is an isolated test mode. The existing `--question` workflow remains the default and is unchanged. The first execution slice deliberately makes one tool call only; multi-step discovery/inspect/execute loops and additional result verification will be added after this mode is tested.
 
 The generic selector uses a conservative name-based read-only filter. For NinjaOne, only discovery/inspection and endpoint execution tools are candidates, and endpoint execution is additionally restricted to arguments beginning with `GET `. Gateway-side approval and method enforcement remain authoritative. Do not expose write-capable MCP servers to this mode until explicit per-tool permissions are configured.
+
+### Bounded MCP tool loop
+
+The generic `--mcp-question` mode now supports a bounded sequence of tool calls (maximum 4 by default): discover an API operation, inspect its schema, execute a GET request, then answer from the returned data. It prevents repeating an identical call in the same request and stops if OLMo selects an unknown tool or invalid action.
+
+The generic mode is still an initial read-only implementation. For NinjaOne, raw requests are blocked and endpoint execution must use a discovered `GET ` endpoint key. Other MCP servers are filtered by conservative read-style tool-name prefixes; do not connect write-capable servers to this mode until their tool permissions are explicitly reviewed.
