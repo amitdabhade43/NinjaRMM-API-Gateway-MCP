@@ -18,7 +18,7 @@ def test_details_prefers_item_endpoint_when_identifier_exists():
         {"endpoint": "GET /v2/devices/{id}", "path": "/v2/devices/{id}"},
     ]
     selected = choose_candidate(candidates, {"mode": "fuzzy_fallback", "selected": []},
-                                {"operation": "details", "identifier": "ABC123"})
+                                {"entity": "devices", "operation": "details", "identifier": "ABC123"})
     assert selected["endpoint"] == "GET /v2/devices/{id}"
 
 
@@ -29,7 +29,7 @@ def test_local_semantic_selection_is_respected():
     ]
     selected = choose_candidate(candidates, {"mode": "local_semantic", "selected": [
         {"endpoint": "GET /v2/organizations", "purpose": "organization collection"}
-    ]}, {"operation": "list", "identifier": None})
+    ]}, {"entity": "organizations", "operation": "list", "identifier": None})
     assert selected["endpoint"] == "GET /v2/organizations"
 
 
@@ -40,7 +40,7 @@ def test_semantic_item_route_is_rejected_for_unscoped_collection_search():
     ]
     selected = choose_candidate(candidates, {"mode": "local_semantic", "selected": [
         {"endpoint": "GET /v2/devices/{id}", "purpose": "device detail"}
-    ]}, {"operation": "details", "identifier": None})
+    ]}, {"entity": "devices", "operation": "details", "identifier": None})
     assert selected["endpoint"] == "GET /v2/devices"
 
 
@@ -87,3 +87,16 @@ def test_device_search_rejects_unrelated_organization_endpoint():
         assert False, "Device search must not execute an organization endpoint"
     except RuntimeError as exc:
         assert "device collection endpoint" in str(exc).casefold()
+
+
+def test_device_details_rejects_unrelated_item_endpoint():
+    candidates = [
+        {"endpoint": "GET /v2/organization/{id}/documents", "path": "/v2/organization/{id}/documents"}
+    ]
+    try:
+        choose_candidate(candidates, {"mode": "local_semantic", "selected": [
+            {"endpoint": "GET /v2/organization/{id}/documents", "purpose": "organization documents"}
+        ]}, {"entity": "devices", "operation": "details", "identifier": "123"})
+        assert False, "Device details must not execute an organization endpoint"
+    except RuntimeError as exc:
+        assert "no matching item get endpoint" in str(exc).casefold()
