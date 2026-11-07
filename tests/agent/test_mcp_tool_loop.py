@@ -203,3 +203,30 @@ def test_loop_returns_argument_validation_feedback_to_model():
     assert manager.calls == [
         ("ninjaone.inspect_endpoint", {"endpoint": "GET /v2/devices"})
     ]
+
+
+
+def test_loop_does_not_execute_when_model_generates_unsupported_filter():
+    manager = FakeManager()
+    llm = FakeLLM([
+        {
+            "action": "call",
+            "tool": "ninjaone.discover_endpoints",
+            "arguments": {"intent": "list devices"},
+            "filters": [{"field": "systemName", "operator": "sounds_like", "value": "2QN"}],
+        },
+        {
+            "action": "call",
+            "tool": "ninjaone.discover_endpoints",
+            "arguments": {"intent": "list devices"},
+            "filters": [{"field": "systemName", "operator": "contains", "value": "2QN"}],
+        },
+        {"action": "final", "answer": "Discovery completed."},
+    ])
+
+    answer = asyncio.run(run_mcp_question(llm, manager, "Find devices mentioning 2QN"))
+
+    assert answer == "Discovery completed."
+    assert manager.calls == [
+        ("ninjaone.discover_endpoints", {"intent": "list devices"})
+    ]
