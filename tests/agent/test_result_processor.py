@@ -1,4 +1,5 @@
-import pytest\nfrom ninjaone_agent.result_processor import process_result
+import pytest
+from ninjaone_agent.result_processor import process_result
 from ninjaone_agent.response import format_fast
 
 def test_count_applies_filter_before_counting():
