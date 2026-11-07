@@ -5,6 +5,7 @@ request. Multi-step reasoning and bounded follow-up calls are a later stage.
 """
 from __future__ import annotations
 
+import difflib
 import json
 import re
 from typing import Any
@@ -63,6 +64,38 @@ def _simple_count_resource(question: str) -> str | None:
     return _COUNT_RESOURCES[next(iter(resources))]
 
 
+def _simple_name_resource(question: str) -> str | None:
+    """Detect a plain request for resource names, including minor spelling errors."""
+    if not re.search(r"\\bname(?:s)?\\b", question, re.I):
+        return None
+
+    words = set(_WORDS.findall(question.casefold()))
+    matched_words: set[str] = set()
+    resources: set[str] = set()
+    for word in words:
+        match = word if word in _COUNT_RESOURCES else None
+        if match is None:
+            candidates = difflib.get_close_matches(
+                word, list(_COUNT_RESOURCES), n=1, cutoff=0.82
+            )
+            match = candidates[0] if candidates else None
+        if match:
+            matched_words.add(word)
+            resources.add(_COUNT_RESOURCES[match])
+
+    if len(resources) != 1:
+        return None
+
+    allowed = _COUNT_FILLER_WORDS | {
+        "can", "could", "i", "get", "show", "list", "fetch", "retrieve",
+        "display", "find", "give", "tell", "me", "what", "which", "please",
+        "want", "need", "name", "names",
+    }
+    if words - allowed - matched_words:
+        return None
+    return next(iter(resources))
+
+
 def _count_collection(payload: Any, resource: str) -> list[Any] | None:
     """Extract an unambiguous collection from the Gateway response envelope."""
     if not isinstance(payload, dict) or payload.get("error"):
@@ -98,7 +131,7 @@ async def _fast_count_with_compat_tools(
 
     discovery = await manager.call_tool(
         "ninjaone.find_endpoint",
-        {"query": f"list {resource}", "method": "GET", "limit": 20},
+        {"query": f"list {resource}", "limit": 20},
     )
     candidates = discovery.get("results", []) if isinstance(discovery, dict) else []
     singular = resource[:-1] if resource.endswith("s") else resource
@@ -156,7 +189,114 @@ async def _fast_count_with_compat_tools(
     return f"There are {count} {label} in NinjaOne."
 
 
-def is_read_only_candidate(tool: MCPToolInfo) -> bool:
+
+
+def _record_name(record: Any) -> str | None:
+    """Find a useful display-name field without sending full records to OLMo."""
+    if isinstance(record, dict):
+        preferred = {
+            "name", "displayname", "organizationname", "orgname",
+            "devicename", "username", "fullname", "companyname",
+        }
+        for key, value in record.items():
+            normalized = re.sub(r"[^a-z0-9]", "", str(key).casefold())
+            if normalized in preferred and isinstance(value, (str, int)):
+                return str(value)
+        for value in record.values():
+            found = _record_name(value)
+            if found:
+                return found
+    elif isinstance(record, list):
+        for value in record:
+            found = _record_name(value)
+            if found:
+                return found
+    return None
+
+
+async def _fast_names_with_compat_tools(
+    manager: MultiMCPManager, resource: str
+) -> str | None:
+    """Discover and return resource names with Python; no OLMo planning/summarization."""
+    available = {tool.qualified_name for tool in manager.list_tools()}
+    required_tools = {
+        "ninjaone.find_endpoint",
+        "ninjaone.describe_endpoint",
+        "ninjaone.call",
+    }
+    if not required_tools.issubset(available):
+        return None
+
+    # Keep fuzzy discovery broad across all supported methods; choose a safe
+    # collection GET only after seeing the ranked OpenAPI candidates.
+    discovery = await manager.call_tool(
+        "ninjaone.find_endpoint", {"query": f"list {resource}", "limit": 20}
+    )
+    candidates = discovery.get("results", []) if isinstance(discovery, dict) else []
+    singular = resource[:-1] if resource.endswith("s") else resource
+    selected_endpoint = None
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        endpoint = candidate.get("endpoint")
+        method = str(candidate.get("method", "")).upper()
+        if not method and isinstance(endpoint, str):
+            method = endpoint.split(None, 1)[0].upper() if " " in endpoint else ""
+        path = str(candidate.get("path", ""))
+        searchable = " ".join(str(candidate.get(key, "")) for key in (
+            "path", "summary", "operation_id", "category", "endpoint"
+        )).casefold()
+        if (
+            isinstance(endpoint, str)
+            and method == "GET"
+            and "{" not in path
+            and (resource in searchable or singular in searchable)
+        ):
+            selected_endpoint = endpoint
+            break
+
+    if not selected_endpoint:
+        return None
+
+    detail = await manager.call_tool(
+        "ninjaone.describe_endpoint", {"endpoint": selected_endpoint}
+    )
+    if not isinstance(detail, dict) or str(detail.get("method", "")).upper() != "GET":
+        return None
+    if "{" in str(detail.get("path", "")) or "}" in str(detail.get("path", "")):
+        return None
+    required_parameters = [
+        item for item in detail.get("parameters", [])
+        if isinstance(item, dict) and item.get("required")
+    ]
+    if required_parameters:
+        return None
+
+    result = await manager.call_tool("ninjaone.call", {"endpoint": selected_endpoint})
+    if isinstance(result, dict) and result.get("error"):
+        return f"NinjaOne returned an error while retrieving {resource}: {result['error']}"
+    records = _count_collection(result, resource)
+    if records is None:
+        return None
+
+    names = []
+    for record in records:
+        name = _record_name(record)
+        if name and name not in names:
+            names.append(name)
+    if not names:
+        return (
+            f"NinjaOne returned {len(records)} {resource}, but the response did not "
+            "contain a recognized name field."
+        )
+
+    output = [f"{resource.capitalize()}"]
+    output.extend(f"{index}. {name}" for index, name in enumerate(names, 1))
+    output.append(f"Total: {len(records)} {resource}")
+    if isinstance(result, dict) and (result.get("truncated") or result.get("complete") is False):
+        output.append("Note: the API response was incomplete; additional records may exist.")
+    return "\\n".join(output)
+\n\ndef is_read_only_candidate(tool: MCPToolInfo) -> bool:
     if tool.server.casefold() == "ninjaone":
         return tool.name in _NINJAONE_SAFE_TOOLS
     return tool.name.casefold().startswith(_READ_PREFIXES)
@@ -327,6 +467,23 @@ async def run_mcp_question(
                 return await _fast_count_with_compat_tools(manager, count_resource)
             except Exception as exc:
                 return f"Unable to complete the NinjaOne count: {type(exc).__name__}: {exc}"
+
+    # Simple name lookups are deterministic: avoid OLMo tool planning and
+    # final summarization, which are the main latency/failure points for 7B models.
+    name_resource = _simple_name_resource(question)
+    if name_resource:
+        available_names = {tool.qualified_name for tool in all_tools}
+        if {
+            "ninjaone.find_endpoint",
+            "ninjaone.describe_endpoint",
+            "ninjaone.call",
+        }.issubset(available_names):
+            try:
+                answer = await _fast_names_with_compat_tools(manager, name_resource)
+                if answer is not None:
+                    return answer
+            except Exception as exc:
+                return f"Unable to retrieve NinjaOne {name_resource}: {type(exc).__name__}: {exc}"
 
     # The MCP server exposes only the seven compatibility tools.
     has_compat_surface = any(
