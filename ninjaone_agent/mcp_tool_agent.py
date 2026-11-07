@@ -117,7 +117,21 @@ async def run_mcp_question(
         # (for example, action="discover_endpoints") instead of action="call".
         # Normalize that shorthand only when it matches an approved tool.
         action = decision.get("action")
-        if action not in {"call", "final"}:
+        if action == "choose_endpoint":
+            # OLMo sometimes invents a planning action instead of selecting
+            # the supplied Gateway discovery tool. Resolve this safely and
+            # deterministically; do not execute an API endpoint at this stage.
+            discovery_tool = next(
+                (item for item in shortlist
+                 if item.server.casefold() == "ninjaone"
+                 and item.name == "discover_endpoints"),
+                None,
+            )
+            if discovery_tool is not None:
+                decision["tool"] = discovery_tool.qualified_name
+                decision["arguments"] = {"intent": question}
+                decision["action"] = "call"
+        elif action not in {"call", "final"}:
             action_tool = next(
                 (item for item in shortlist
                  if action in {item.name, item.qualified_name}),
