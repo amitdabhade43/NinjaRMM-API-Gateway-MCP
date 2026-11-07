@@ -22,3 +22,13 @@ def test_unsafe_filter_operator_is_dropped():
         "filters": [{"field": "status", "operator": "execute", "value": "offline"}]}]},
         "count offline devices")
     assert plan["tasks"][0]["filters"] == []
+
+
+def test_planner_cannot_inject_path_or_query_parameters():
+    plan = validate_plan({"tasks": [{
+        "entity": "devices", "operation": "list",
+        "path_params": {"q": "2qn"}, "query": {"q": "2qn"},
+        "filters": [{"field": "name", "operator": "startswith", "value": "2qn"}],
+    }]}, "list device names starting with 2qn")
+    assert plan["tasks"][0]["path_params"] == {}
+    assert plan["tasks"][0]["query"] == {}
