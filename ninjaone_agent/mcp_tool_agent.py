@@ -48,6 +48,111 @@ def rank_tools(question: str, tools: list[MCPToolInfo], limit: int = 10) -> list
     return [row[2] for row in ranked[:max(1, limit)]]
 
 
+
+def _compact_tool_schema(tool: MCPToolInfo) -> dict[str, Any]:
+    """Keep the model's tool catalog readable and cheap to process."""
+    schema = tool.input_schema if isinstance(tool.input_schema, dict) else {}
+    properties = schema.get("properties", {})
+    compact_properties = {}
+    if isinstance(properties, dict):
+        for name, details in properties.items():
+            if not isinstance(details, dict):
+                compact_properties[name] = {}
+                continue
+            item = {"type": details.get("type")}
+            if details.get("description"):
+                item["description"] = str(details["description"])[:180]
+            if details.get("enum"):
+                item["enum"] = details["enum"]
+            compact_properties[name] = item
+    return {
+        "name": tool.qualified_name,
+        "description": tool.description[:500],
+        "required": schema.get("required", []),
+        "properties": compact_properties,
+    }
+
+
+def _find_tool(shortlist: list[MCPToolInfo], name: Any) -> MCPToolInfo | None:
+    if not isinstance(name, str) or not name.strip():
+        return None
+    candidate = name.strip().casefold()
+    for tool in shortlist:
+        if candidate in {tool.qualified_name.casefold(), tool.name.casefold()}:
+            return tool
+    # Small naming variation frequently produced by local models:
+    # discover_endpoint vs discover_endpoints. Only resolve when unique.
+    normalized = candidate.rstrip("s")
+    matches = [
+        tool for tool in shortlist
+        if tool.name.casefold().rstrip("s") == normalized
+        or tool.qualified_name.casefold().rstrip("s") == normalized
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _normalize_decision(
+    decision: dict[str, Any],
+    shortlist: list[MCPToolInfo],
+    question: str,
+) -> tuple[str, MCPToolInfo | None, dict[str, Any]]:
+    """Recover common local-model action variations without relaxing tool policy."""
+    action = str(decision.get("action", "")).strip().casefold()
+    arguments = decision.get("arguments")
+    if not isinstance(arguments, dict):
+        arguments = {}
+
+    # Prefer an explicit, approved tool field. Some models emit action=get,
+    # action=discover_endpoint, etc. even when the tool field is correct.
+    selected = _find_tool(shortlist, decision.get("tool"))
+    if selected is not None and action != "final":
+        action = "call"
+
+    if action == "final":
+        return action, None, arguments
+
+    if selected is None:
+        selected = _find_tool(shortlist, decision.get("tool") or action)
+        if selected is not None:
+            action = "call"
+
+    # If the model describes a planning operation (get/list/discover/choose)
+    # but omits a concrete tool, route to the server's discovery tool. This
+    # discovers the correct API operation instead of executing an invented path.
+    if selected is None and action in {
+        "get", "list", "search", "find", "discover_endpoint",
+        "choose_endpoint", "select_endpoint", "lookup",
+    }:
+        selected = next(
+            (tool for tool in shortlist
+             if tool.server.casefold() == "ninjaone"
+             and tool.name == "discover_endpoints"),
+            None,
+        )
+        if selected is not None:
+            arguments = {}
+
+    if selected is None or action != "call":
+        return action, None, arguments
+
+    # Fill only well-understood search-intent parameters from the original
+    # request. All other required arguments must come from the model/schema.
+    schema = selected.input_schema if isinstance(selected.input_schema, dict) else {}
+    required = schema.get("required", [])
+    properties = schema.get("properties", {})
+    for key in required:
+        if key in arguments:
+            continue
+        if key.casefold() in {"intent", "query", "question", "search", "search_query"}:
+            arguments[key] = question
+        elif isinstance(properties, dict):
+            details = properties.get(key, {})
+            description = str(details.get("description", "")).casefold() if isinstance(details, dict) else ""
+            if any(word in description for word in ("user request", "natural language", "search intent")):
+                arguments[key] = question
+
+    return "call", selected, arguments
+
 def validate_tool_arguments(tool: MCPToolInfo, arguments: Any) -> dict[str, Any]:
     if not isinstance(arguments, dict):
         raise ValueError("Tool arguments must be a JSON object.")
@@ -84,11 +189,10 @@ async def run_mcp_question(
     if not shortlist:
         return "I couldn't find a suitable read-only MCP tool for that request."
 
-    tool_catalog = [{
-        "name": item.qualified_name,
-        "description": item.description,
-        "input_schema": item.input_schema,
-    } for item in shortlist]
+    # Like Clawd-Code's central tool registry, keep tool metadata separate
+    # from execution validation. The model sees a compact schema; Python
+    # validates calls against the full MCP schema before dispatch.
+    tool_catalog = [_compact_tool_schema(item) for item in shortlist]
     system = (
         "You are a careful MCP tool-using agent. You may call one supplied tool "
         "per step, or return a final answer. Use only the exact tool names and "
@@ -143,49 +247,26 @@ async def run_mcp_question(
             if normalized_filters:
                 active_filters = normalized_filters
 
-        # Some OLMo responses use the selected tool name as the action
-        # (for example, action="discover_endpoints") instead of action="call".
-        # Normalize that shorthand only when it matches an approved tool.
-        action = decision.get("action")
-        if action == "choose_endpoint":
-            # OLMo sometimes invents a planning action instead of selecting
-            # the supplied Gateway discovery tool. Resolve this safely and
-            # deterministically; do not execute an API endpoint at this stage.
-            discovery_tool = next(
-                (item for item in shortlist
-                 if item.server.casefold() == "ninjaone"
-                 and item.name == "discover_endpoints"),
-                None,
-            )
-            if discovery_tool is not None:
-                decision["tool"] = discovery_tool.qualified_name
-                decision["arguments"] = {"intent": question}
-                decision["action"] = "call"
-        elif action not in {"call", "final"}:
-            action_tool = next(
-                (item for item in shortlist
-                 if action in {item.name, item.qualified_name}),
-                None,
-            )
-            if action_tool is not None:
-                decision["tool"] = action_tool.qualified_name
-                decision["action"] = "call"
-
-        if decision.get("action") == "final":
+        action, selected, normalized_arguments = _normalize_decision(
+            decision, shortlist, question
+        )
+        if action == "final":
             answer = decision.get("answer")
             if isinstance(answer, str) and answer.strip():
                 return answer.strip()
             return "The agent did not provide a valid final answer."
 
-        if decision.get("action") != "call":
-            return ("OLMo returned an unsupported action: " + repr(decision.get("action")) + ". " + "Decision received: " + json.dumps(decision, ensure_ascii=False, default=str)[:1200] + ". No MCP tool was executed.")
-
-        name = decision.get("tool")
-        selected = next((item for item in shortlist if item.qualified_name == name), None)
+        if action != "call":
+            return (
+                "OLMo returned an unsupported action: " + repr(decision.get("action"))
+                + ". Decision received: "
+                + json.dumps(decision, ensure_ascii=False, default=str)[:1200]
+                + ". No MCP tool was executed."
+            )
         if selected is None:
             return "OLMo selected a tool that was not in the approved tool shortlist."
 
-        arguments = validate_tool_arguments(selected, decision.get("arguments", {}))
+        arguments = validate_tool_arguments(selected, normalized_arguments)
         call_key = selected.qualified_name + ":" + json.dumps(arguments, sort_keys=True, default=str)
         if call_key in seen_calls:
             return "The agent attempted to repeat the same tool call. Stopping safely."
