@@ -47,3 +47,20 @@ def test_complete_json_stops_after_second_invalid_response():
         asyncio.run(llm.complete_json("system", "user request"))
 
     assert llm.calls == 2
+
+
+
+def test_complete_json_ignores_extra_closing_brace_after_valid_object():
+    llm = FakeLLM([
+        '{"action": "discover_endpoints", "tool": "ninjaone.discover_endpoints", '
+        '"arguments": {"intent": "find devices whose names start with 2QN"}}}',
+    ])
+
+    result = asyncio.run(llm.complete_json("system", "user request"))
+
+    assert result == {
+        "action": "discover_endpoints",
+        "tool": "ninjaone.discover_endpoints",
+        "arguments": {"intent": "find devices whose names start with 2QN"},
+    }
+    assert llm.calls == 1
