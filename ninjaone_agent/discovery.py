@@ -31,7 +31,7 @@ def choose_candidate(candidates: list[dict[str, Any]], semantic: dict[str, Any],
     collection_pool = [item for item in candidates if not _has_path_parameters(item)]
     if not collection_pool:
         raise RuntimeError(
-            "No collection GET endpoint was discovered. A device ID is required for item-detail endpoints."
+            "No collection GET endpoint was discovered. No device ID was supplied, so an item-detail endpoint cannot be used."
         )
 
     entity = str(task.get("entity", "")).casefold()
