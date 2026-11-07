@@ -2,14 +2,30 @@
 from __future__ import annotations
 import argparse
 import asyncio
+import json
 import os
 import sys
 from .config import AgentConfig, PROJECT_ROOT
 from .executor import execute_plan
 from .llm import LocalLLM
 from .mcp_gateway import GatewayConnection
+from .mcp_registry import MCPServerConfig, MultiMCPManager
 from .planner import create_plan
 from .response import format_response
+
+async def list_mcp_tools() -> int:
+    config = AgentConfig.from_env()
+    servers = MCPServerConfig.load_all(config.mcp_command, config.mcp_args)
+    async with MultiMCPManager(servers) as manager:
+        status = manager.server_status()
+        print("MCP server status", flush=True)
+        print(json.dumps(status, indent=2), flush=True)
+        print("\\nDiscovered tools", flush=True)
+        for tool in manager.list_tools():
+            print(f"\\n[{tool.qualified_name}] {tool.description}", flush=True)
+            print(json.dumps(tool.input_schema, ensure_ascii=False), flush=True)
+    return 0
+
 
 async def run_question(question: str) -> int:
     config = AgentConfig.from_env()
@@ -48,8 +64,13 @@ async def run_question(question: str) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Local OLMo NinjaOne natural-language agent")
     parser.add_argument("-q", "--question", help="Run one question and exit")
+    parser.add_argument("--list-mcp-tools", action="store_true",
+                        help="Connect configured MCP servers and list their tools without executing them")
     args = parser.parse_args()
     try:
+        if args.list_mcp_tools:
+            asyncio.run(list_mcp_tools())
+            return
         if args.question:
             asyncio.run(run_question(args.question))
             return
