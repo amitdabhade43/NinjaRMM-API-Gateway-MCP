@@ -48,8 +48,7 @@ def _matches(record: Any, condition: dict[str, Any]) -> bool:
 
 
 def _payload_data(api_result: dict[str, Any]) -> Any:
-    data = api_result.get("data", api_result.get("result", api_result))
-    return data
+    return api_result.get("data", api_result.get("result", api_result))
 
 
 def is_truncated(api_result: Any) -> bool:
@@ -75,6 +74,9 @@ def extract_records(api_result: Any) -> list[Any] | None:
         arrays = [value for value in data.values() if isinstance(value, list)]
         if len(arrays) == 1:
             return arrays[0]
+        # Detail endpoints often return one record object rather than a list.
+        if any(key in data for key in ("id", "uid", "displayName", "systemName", "name")):
+            return [data]
     return None
 
 
