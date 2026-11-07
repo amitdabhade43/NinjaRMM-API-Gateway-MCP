@@ -1,6 +1,7 @@
 """Deterministic result extraction, filtering, counting and completeness checks."""
 from __future__ import annotations
 from typing import Any
+from difflib import SequenceMatcher
 
 DEVICE_NAME_FIELDS = ("displayName", "systemName", "dnsName", "netbiosName", "name", "hostname")
 
@@ -33,7 +34,15 @@ def _matches(record: Any, condition: dict[str, Any]) -> bool:
         if actual is None:
             return False
         if operator == "contains":
-            return str(expected).casefold() in str(actual).casefold()
+            wanted = str(expected).casefold().strip()
+            candidate = str(actual).casefold().strip()
+            if wanted in candidate:
+                return True
+            # Tolerate small spelling mistakes in a person's name, but only
+            # for short name tokens; do not fuzzy-match IDs or arbitrary fields.
+            if field.casefold() in {"name", "username", "fullname"} and len(wanted) >= 4:
+                return any(SequenceMatcher(None, wanted, token).ratio() >= 0.80
+                           for token in candidate.split())
         if operator == "startswith":
             return str(actual).casefold().startswith(str(expected).casefold())
         if operator == "in":
@@ -95,6 +104,15 @@ def process_result(task: dict[str, Any], api_result: Any) -> dict[str, Any]:
     filters = task.get("filters", [])
     filtered = [record for record in records if all(_matches(record, condition) for condition in filters)]
     count_field = task.get("count_field")
+    # Never combine access lists from several people with the same/similar
+    # name. Ask the user to identify the intended person first.
+    if count_field and len(filtered) > 1:
+        return {
+            "task": task, "status": "success", "count": None,
+            "clarification_required": True, "complete": bool(api_result.get("complete", True)),
+            "matched_subjects": len(filtered), "total_records_received": len(records),
+            "data": filtered[:20], "endpoint": api_result.get("endpoint"),
+        }
     if count_field:
         related_ids = set()
         for record in filtered:
@@ -117,6 +135,6 @@ def process_result(task: dict[str, Any], api_result: Any) -> dict[str, Any]:
         "max_pages_reached": api_result.get("max_pages_reached", False) if isinstance(api_result, dict) else False,
         "endpoint": api_result.get("endpoint") if isinstance(api_result, dict) else None,
     }
-    if operation in {"list", "list_and_count", "details", "summary"}:
+    if count_field or operation in {"list", "list_and_count", "details", "summary"}:
         result["data"] = filtered
     return result
