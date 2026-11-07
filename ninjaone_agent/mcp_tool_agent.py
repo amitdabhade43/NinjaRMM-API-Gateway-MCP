@@ -131,6 +131,7 @@ def _normalize_decision(
         )
         if selected is not None:
             arguments = {}
+            action = "call"
 
     if selected is None or action != "call":
         return action, None, arguments
