@@ -13,7 +13,7 @@ from .executor import execute_plan
 from .llm import LocalLLM
 from .mcp_gateway import GatewayConnection
 from .mcp_registry import MCPServerConfig, MultiMCPManager
-from .mcp_tool_agent import run_mcp_question
+from .workflow import run_agent_workflow
 from .planner import create_plan
 from .response import format_response
 from .chat import format_conversation_context, should_use_mcp
@@ -138,7 +138,7 @@ async def run_chat_session() -> int:
                             flush=True,
                         )
                     context = format_conversation_context(history)
-                    print("[MCP] Working...", flush=True)
+                    print("[LangGraph] Starting OLMo agent workflow...", flush=True)
                     def confirm_write(operation: str, body):
                         print("\n[CONFIRMATION REQUIRED] NinjaOne write operation:", flush=True)
                         print(operation, flush=True)
@@ -147,9 +147,12 @@ async def run_chat_session() -> int:
                         reply = input("Type YES to execute this exact request (anything else cancels): ").strip()
                         return reply == "YES"
 
-                    answer = await run_mcp_question(
+                    answer = await run_agent_workflow(
                         llm, manager, question, conversation_context=context,
                         approval_callback=confirm_write,
+                        on_plan=lambda plan: print(
+                            "[PLAN] " + json.dumps(plan, ensure_ascii=False), flush=True
+                        ),
                     )
                     previous_mode = "mcp"
                 else:
