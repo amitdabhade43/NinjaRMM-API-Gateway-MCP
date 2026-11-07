@@ -60,14 +60,16 @@ def test_all_seven_compatibility_tools_are_available_to_agent():
          {"request": "POST /v2/devices"}),
     ],
 )
-def test_compatibility_api_write_calls_are_blocked(name, properties, required, arguments):
+def test_compatibility_api_write_calls_require_confirmation(name, properties, required, arguments):
     selected = tool(name, properties, required)
     manager = Manager(selected)
     llm = LLM({"action": "call", "tool": f"ninjaone.{name}", "arguments": arguments})
 
-    with pytest.raises(PermissionError, match="GET"):
-        asyncio.run(run_mcp_question(llm, manager, "Create a device"))
-
+    answer = asyncio.run(run_mcp_question(
+        llm, manager, "Create a device",
+        approval_callback=lambda operation, body: False,
+    ))
+    assert answer.startswith("Cancelled.")
     assert manager.calls == []
 
 
