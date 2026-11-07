@@ -4,6 +4,7 @@ from typing import Any
 
 DEVICE_NAME_FIELDS = ("displayName", "systemName", "dnsName", "netbiosName", "name", "hostname")
 
+
 def _get_path(item: Any, path: str) -> Any:
     value = item
     for part in path.split("."):
@@ -13,6 +14,7 @@ def _get_path(item: Any, path: str) -> Any:
             return None
     return value
 
+
 def _matches(record: Any, condition: dict[str, Any]) -> bool:
     field = str(condition["field"])
     expected = condition.get("value")
@@ -21,6 +23,7 @@ def _matches(record: Any, condition: dict[str, Any]) -> bool:
         actual_values = [record.get(key) for key in DEVICE_NAME_FIELDS if record.get(key) not in (None, "")]
     else:
         actual_values = [_get_path(record, field)]
+
     def matches_one(actual: Any) -> bool:
         if actual is None:
             return False
@@ -40,44 +43,59 @@ def _matches(record: Any, condition: dict[str, Any]) -> bool:
                     "lt": left < right, "lte": left <= right}[operator]
         equal = str(actual).casefold() == str(expected).casefold()
         return not equal if operator == "ne" else equal
+
     return any(matches_one(actual) for actual in actual_values)
+
+
+def _payload_data(api_result: dict[str, Any]) -> Any:
+    data = api_result.get("data", api_result.get("result", api_result))
+    return data
+
+
+def is_truncated(api_result: Any) -> bool:
+    if not isinstance(api_result, dict):
+        return False
+    data = _payload_data(api_result)
+    return bool(api_result.get("truncated") or api_result.get("_truncated") or
+                (isinstance(data, dict) and data.get("_truncated")))
+
 
 def extract_records(api_result: Any) -> list[Any] | None:
     if isinstance(api_result, list):
         return api_result
     if not isinstance(api_result, dict):
         return None
-    data = api_result.get("data", api_result)
+    data = _payload_data(api_result)
     if isinstance(data, list):
         return data
     if isinstance(data, dict):
-        # Gateway truncation wrapper: {"items": [...], "_truncated": true, ...}
-        if isinstance(data.get("items"), list):
-            return data["items"]
+        for key in ("items", "results", "records", "devices", "users", "organizations"):
+            if isinstance(data.get(key), list):
+                return data[key]
         arrays = [value for value in data.values() if isinstance(value, list)]
         if len(arrays) == 1:
             return arrays[0]
     return None
 
+
 def process_result(task: dict[str, Any], api_result: Any) -> dict[str, Any]:
     if isinstance(api_result, dict) and api_result.get("error"):
-        return {"task": task, "status": "error", "error": api_result["error"],
-                "complete": False}
+        return {"task": task, "status": "error", "error": api_result["error"], "complete": False}
     records = extract_records(api_result)
     if records is None:
-        return {"task": task, "status": "success", "data": api_result,
-                "complete": api_result.get("complete", True) if isinstance(api_result, dict) else True}
+        return {"task": task, "status": "error",
+                "error": "The MCP response did not contain a recognizable record collection. No count was reported.",
+                "complete": False, "raw_response": api_result}
     filters = task.get("filters", [])
-    filtered = [record for record in records
-                if all(_matches(record, condition) for condition in filters)]
+    filtered = [record for record in records if all(_matches(record, condition) for condition in filters)]
+    truncated = is_truncated(api_result)
     complete = api_result.get("complete", True) if isinstance(api_result, dict) else True
-    truncated = api_result.get("truncated", False) if isinstance(api_result, dict) else False
     operation = task["operation"]
     result = {
         "task": task, "status": "success", "count": len(filtered),
         "total_records_received": len(records),
-        "complete": bool(complete) and not bool(truncated),
-        "truncated": bool(truncated),
+        "complete": bool(complete) and not truncated,
+        "truncated": truncated,
         "pages_fetched": api_result.get("pages_fetched") if isinstance(api_result, dict) else None,
         "max_pages_reached": api_result.get("max_pages_reached", False) if isinstance(api_result, dict) else False,
         "endpoint": api_result.get("endpoint") if isinstance(api_result, dict) else None,
