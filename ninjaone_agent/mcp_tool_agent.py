@@ -207,7 +207,11 @@ async def run_mcp_question(
         }
         # Apply filters to actual returned records in Python, not by asking the
         # LLM to visually scan a potentially large page of JSON.
-        if active_filters and not filters_applied:
+        is_ninjaone_metadata_step = (
+            selected.server.casefold() == "ninjaone"
+            and selected.name in {"discover_endpoints", "inspect_endpoint"}
+        )
+        if active_filters and not filters_applied and not is_ninjaone_metadata_step:
             try:
                 result, filter_summary = filter_result_payload(result, active_filters)
                 entry["result"] = result
