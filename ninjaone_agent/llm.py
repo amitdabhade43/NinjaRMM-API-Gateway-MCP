@@ -2,11 +2,17 @@
 from __future__ import annotations
 import json
 from typing import Any, AsyncIterator
-from openai import AsyncOpenAI
 from .config import AgentConfig
 
 class LocalLLM:
     def __init__(self, config: AgentConfig):
+        try:
+            from openai import AsyncOpenAI
+        except ImportError as exc:
+            raise RuntimeError(
+                "Agent dependency missing. Install it with: "
+                "python -m pip install -r requirements-agent.txt"
+            ) from exc
         self.config = config
         self.client = AsyncOpenAI(base_url=config.foundry_url, api_key=config.api_key,
                                   timeout=config.request_timeout, max_retries=0)
