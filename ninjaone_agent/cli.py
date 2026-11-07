@@ -38,7 +38,7 @@ async def run_generic_mcp_question(question: str) -> int:
             print("Connected:", ", ".join(manager.server_status()["connected"]), flush=True)
             print("Selecting a relevant read-only tool...", flush=True)
             answer = await run_mcp_question(llm, manager, question)
-        print("\\nResult\\n------", flush=True)
+        print("\nResult\n------", flush=True)
         print(answer, flush=True)
         return 0
     finally:
