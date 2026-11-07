@@ -349,9 +349,15 @@ async def run_mcp_question(
     ]
     shortlist = rank_tools(question, agent_tools)
     for item in agent_tools:
-        if item.server.casefold() == "ninjaone" and item.name in _NINJAONE_COMPAT_TOOLS:
-            if item not in shortlist:
-                shortlist.append(item)
+        if item.server.casefold() != "ninjaone":
+            continue
+        if has_compat_surface:
+            include_tool = item.name in _NINJAONE_COMPAT_TOOLS
+        else:
+            # Older MCP servers may not expose the compatibility aliases.
+            include_tool = is_read_only_candidate(item)
+        if include_tool and item not in shortlist:
+            shortlist.append(item)
 
     if not shortlist:
         return "I couldn't find a suitable read-only MCP tool for that request."
