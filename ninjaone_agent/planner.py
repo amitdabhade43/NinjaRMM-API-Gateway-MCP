@@ -8,6 +8,17 @@ from .llm import LocalLLM
 INSTRUCTION = PROJECT_ROOT / "agents" / "planner.md"
 VALID_OPERATIONS = {"count", "list", "list_and_count", "details", "summary"}
 VALID_FORMATS = {"count_only", "list", "list_and_count", "summary", "detailed"}
+_DEVICE_ENTITY_ALIASES = {"device", "devices", "system", "systems", "endpoint", "endpoints", "computer", "computers", "workstation", "workstations", "server", "servers", "machine", "machines"}
+
+
+def normalize_entity(value: str) -> str:
+    """Normalize common endpoint-inventory wording to the provider entity."""
+    cleaned = re.sub(r"[^a-z0-9]+", " ", value.casefold()).strip()
+    if cleaned in _DEVICE_ENTITY_ALIASES:
+        return "devices"
+    if any(token in _DEVICE_ENTITY_ALIASES for token in cleaned.split()):
+        return "devices"
+    return value.strip()[:100]
 _FILTER_INTENT = re.compile(
     r"\b(offline|online|active|inactive|enabled|disabled|open|closed|with|whose|"
     r"starting|starts|beginning|ending|ends|assigned|unassigned|managed|unmanaged|"
@@ -28,7 +39,7 @@ def validate_plan(plan: dict[str, Any], original_question: str) -> dict[str, Any
         operation = str(task.get("operation", "list")).lower()
         if operation not in VALID_OPERATIONS:
             operation = "list"
-        entity = str(task.get("entity", "records")).strip()[:100]
+        entity = normalize_entity(str(task.get("entity", "records")))
         description = str(task.get("description") or f"{operation} {entity}").strip()[:300]
         filters = task.get("filters", [])
         if isinstance(filters, dict):
