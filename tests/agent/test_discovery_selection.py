@@ -28,3 +28,31 @@ def test_local_semantic_selection_is_respected():
         {"endpoint": "GET /v2/organizations", "purpose": "organization collection"}
     ]}, {"operation": "list", "identifier": None})
     assert selected["endpoint"] == "GET /v2/organizations"
+
+def test_semantic_item_route_is_rejected_for_unscoped_collection_search():
+    candidates = [
+        {"endpoint": "GET /v2/devices/{id}", "path": "/v2/devices/{id}"},
+        {"endpoint": "GET /v2/devices", "path": "/v2/devices"},
+    ]
+    selected = choose_candidate(candidates, {"mode": "local_semantic", "selected": [
+        {"endpoint": "GET /v2/devices/{id}", "purpose": "device detail"}
+    ]}, {"operation": "details", "identifier": None})
+    assert selected["endpoint"] == "GET /v2/devices"
+
+
+def test_unscoped_search_never_falls_back_to_item_endpoint():
+    candidates = [
+        {"endpoint": "GET /v2/devices/{id}", "path": "/v2/devices/{id}"},
+    ]
+    try:
+        choose_candidate(candidates, {"mode": "fuzzy_fallback", "selected": []},
+                         {"operation": "list", "identifier": None})
+        assert False, "Expected collection endpoint selection to fail safely"
+    except RuntimeError as exc:
+        assert "no device ID" in str(exc)
+
+
+def test_startswith_filter_is_case_insensitive():
+    from ninjaone_agent.result_processor import _matches
+    assert _matches({"name": "2QN-LAPTOP-01"},
+                    {"field": "name", "operator": "startswith", "value": "2qn"})
