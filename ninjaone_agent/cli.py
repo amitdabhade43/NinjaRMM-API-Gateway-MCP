@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import sys
+import traceback
 from .config import AgentConfig, PROJECT_ROOT
 from .executor import execute_plan
 from .llm import LocalLLM
@@ -108,7 +109,8 @@ def main() -> None:
             if question:
                 asyncio.run(run_question(question))
     except Exception as exc:
-        print(f"Agent error: {exc}", file=sys.stderr)
+        print(f"Agent error: {type(exc).__name__}: {exc}", file=sys.stderr)
+        traceback.print_exception(type(exc), exc, exc.__traceback__)
         raise SystemExit(1)
 
 if __name__ == "__main__":
