@@ -143,7 +143,7 @@ def record_matches(record: dict[str, Any], filters: list[dict[str, Any]]) -> boo
 def _record_arrays(value: Any, path: tuple[str, ...] = ()):
     """Yield arrays of objects, preferring common record-container names."""
     if isinstance(value, list):
-        if value and all(isinstance(item, dict) for item in value):
+        if not value or all(isinstance(item, dict) for item in value):
             yield path, value
         for index, item in enumerate(value):
             yield from _record_arrays(item, path + (str(index),))
@@ -177,7 +177,7 @@ def filter_result_payload(payload: Any, filters: list[dict[str, Any]]) -> tuple[
     if not filters:
         return payload, {"examined": 0, "matched": 0}
     candidates = list(_record_arrays(payload))
-    if isinstance(payload, list) and payload and all(isinstance(x, dict) for x in payload):
+    if isinstance(payload, list) and (not payload or all(isinstance(x, dict) for x in payload)):
         candidates.append(((), payload))
     if not candidates:
         raise ValueError("The MCP result did not contain a record collection to filter.")
