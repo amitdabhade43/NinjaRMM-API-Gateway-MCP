@@ -21,7 +21,10 @@ def format_fast(plan: dict[str, Any], results: list[dict[str, Any]]) -> str:
             continue
         if result.get("clarification_required"):
             matches = result.get("data", [])
-            if not matches:
+            if not result.get("complete", True):
+                lines.append("The end-user search was incomplete, so I cannot safely confirm a unique person yet.")
+                lines.append("Please retry after checking the MCP pagination/response limit.")
+            elif not matches:
                 lines.append("I could not find a matching person in the end-user records.")
                 lines.append("Please check the spelling or provide the person's email address.")
             else:
