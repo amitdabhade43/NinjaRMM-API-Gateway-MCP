@@ -320,7 +320,7 @@ async def run_mcp_question(
             if selected.name == "memory_save" and not re.search(r"\b(save|remember|store)\\b", question, re.I):
                 raise PermissionError("Save a query template only when the user explicitly asks to save or remember it.")
             if selected.name == "memory_list" and not re.search(
-                r"\\b(saved queries|saved searches|saved query templates|memories)\\b", question, re.I
+                r"\b(saved queries|saved searches|saved query templates|memories)\\b", question, re.I
             ):
                 raise PermissionError("List saved-query memory only when the user asks to view saved queries.")
             if selected.name == "memory_delete" and not (
