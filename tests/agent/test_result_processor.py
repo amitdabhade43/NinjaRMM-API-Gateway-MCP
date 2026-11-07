@@ -176,6 +176,7 @@ def test_accessible_device_count_deduplicates_device_ids_across_matching_users()
         {"firstName": "Richard", "lastName": "O", "accessibleDeviceIds": [2, 3]},
     ]})
     assert result["count"] == 3
+    assert result["clarification_required"] is False
 
 
 def test_access_count_requires_clarification_when_multiple_people_match():
@@ -202,3 +203,18 @@ def test_person_name_filter_tolerates_simple_typo():
     ]})
     assert result["count"] == 1
     assert result["data"][0]["id"] == 1
+
+
+def test_duplicate_rows_for_same_person_are_deduplicated_by_identity():
+    task = {"description": "Count devices accessible to Richard O", "operation": "count",
+            "filters": [{"field": "name", "operator": "contains", "value": "richard o"}],
+            "count_field": "accessibleDeviceIds"}
+    result = process_result(task, {"complete": True, "data": [
+        {"id": 7, "firstName": "Richard", "lastName": "O", "email": "richard@example.com",
+         "accessibleDeviceIds": [1, 2]},
+        {"id": 7, "firstName": "Richard", "lastName": "O", "email": "richard@example.com",
+         "accessibleDeviceIds": [2, 3]},
+    ]})
+    assert result["count"] == 3
+    assert result["matched_subjects"] == 1
+    assert result.get("clarification_required") is not True
