@@ -1,8 +1,4 @@
-"""One-call, schema-checked execution across configured MCP servers.
-
-This first execution stage intentionally performs one selected tool call per
-request. Multi-step reasoning and bounded follow-up calls are a later stage.
-"""
+"""OLMo-driven, bounded tool reasoning across configured MCP servers."""
 from __future__ import annotations
 
 import difflib
@@ -462,41 +458,8 @@ async def run_mcp_question(
     conversation_context: str = "",
     approval_callback=None,
 ) -> str:
-    """Run a bounded discover/inspect/execute loop over safe MCP tools."""
+    """Run an OLMo-directed discover/inspect/execute/reason loop over MCP tools."""
     all_tools = manager.list_tools()
-
-    # Fast path: plain collection counts need no planning or answer-generation
-    # inference. Python discovers, verifies, executes and counts through the
-    # seven-tool compatibility surface.
-    count_resource = _simple_count_resource(question)
-    if count_resource:
-        available_names = {tool.qualified_name for tool in all_tools}
-        if {
-            "ninjaone.find_endpoint",
-            "ninjaone.describe_endpoint",
-            "ninjaone.call",
-        }.issubset(available_names):
-            try:
-                return await _fast_count_with_compat_tools(manager, count_resource)
-            except Exception as exc:
-                return f"Unable to complete the NinjaOne count: {type(exc).__name__}: {exc}"
-
-    # Simple name lookups are deterministic: avoid OLMo tool planning and
-    # final summarization, which are the main latency/failure points for 7B models.
-    name_resource = _simple_name_resource(question)
-    if name_resource:
-        available_names = {tool.qualified_name for tool in all_tools}
-        if {
-            "ninjaone.find_endpoint",
-            "ninjaone.describe_endpoint",
-            "ninjaone.call",
-        }.issubset(available_names):
-            try:
-                answer = await _fast_names_with_compat_tools(manager, name_resource)
-                if answer is not None:
-                    return answer
-            except Exception as exc:
-                return f"Unable to retrieve NinjaOne {name_resource}: {type(exc).__name__}: {exc}"
 
     # The MCP server exposes only the seven compatibility tools.
     has_compat_surface = any(
