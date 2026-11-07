@@ -229,7 +229,8 @@ async def run_mcp_question(
 
     for step in range(max(1, min(max_steps, 6))):
         prompt = (
-            "USER REQUEST:\n" + question +
+            "CONVERSATION CONTEXT (may be empty):\n" + (conversation_context or "None") +
+            "\n\nCURRENT USER REQUEST:\n" + question +
             "\n\nAVAILABLE TOOLS:\n" + json.dumps(tool_catalog, ensure_ascii=False) +
             "\n\nPREVIOUS TOOL RESULTS:\n" + json.dumps(history, ensure_ascii=False, default=str) +
             f"\n\nChoose the next action. This is step {step + 1} of {max_steps}."
@@ -355,7 +356,8 @@ async def run_mcp_question(
     )
     return await llm.complete(
         final_system,
-        "USER REQUEST:\n" + question + "\n\nAPPLIED FILTERS:\n" +
+        "CONVERSATION CONTEXT:\n" + (conversation_context or "None") +
+        "\n\nCURRENT USER REQUEST:\n" + question + "\n\nAPPLIED FILTERS:\n" +
         json.dumps(active_filters, ensure_ascii=False, default=str) +
         "\n\nMCP TOOL RESULTS:\n" +
         json.dumps(history, ensure_ascii=False, default=str)[:18000],
