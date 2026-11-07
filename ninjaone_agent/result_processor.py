@@ -121,7 +121,17 @@ def process_result(task: dict[str, Any], api_result: Any) -> dict[str, Any]:
                 f"id:{user_id}" if user_id is not None else f"name:{full_name}"
             )
             if identity.strip() not in {"name:", "email:"}:
-                unique_people.setdefault(identity, record)
+                if identity not in unique_people:
+                    unique_people[identity] = dict(record)
+                else:
+                    # The API can return repeated rows for one identity.
+                    # Merge related-device arrays so no accessible IDs are lost.
+                    existing_ids = unique_people[identity].get(count_field)
+                    new_ids = record.get(count_field)
+                    if isinstance(existing_ids, list) or isinstance(new_ids, list):
+                        merged = list(existing_ids) if isinstance(existing_ids, list) else []
+                        merged.extend(new_ids if isinstance(new_ids, list) else [])
+                        unique_people[identity][count_field] = list(dict.fromkeys(merged))
 
     # A unique identity is safe to count; two identities with the same search
     # name require clarification. Incomplete source results are never trusted.
