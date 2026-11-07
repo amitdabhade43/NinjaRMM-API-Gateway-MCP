@@ -11,6 +11,7 @@ from ninjaone_agent.mcp_tool_agent import (
 )
 from ninjaone_agent.llm import LocalLLM
 from ninjaone_agent.chat import should_use_mcp
+import ninjaone_agent.workflow as workflow
 
 
 SEVEN_TOOLS = {
@@ -246,3 +247,53 @@ def test_simple_organization_name_lookup_uses_olmo_tool_reasoning():
     assert "HOERBIGER" in answer
     assert "HOERBIGER - Unattended" in answer
     assert llm.decisions == []
+
+
+
+def test_invalid_planner_json_falls_back_to_tool_agent(monkeypatch):
+    class BrokenPlanner:
+        async def complete_json(self, system, prompt):
+            raise ValueError("OLMo returned invalid JSON twice")
+
+    invoked = {}
+
+    async def fake_tool_agent(llm, manager, question, **kwargs):
+        invoked["question"] = question
+        invoked["context"] = kwargs.get("conversation_context", "")
+        return "Technician count retrieved by OLMo."
+
+    monkeypatch.setattr(workflow, "run_mcp_question", fake_tool_agent)
+    plans = []
+    question = "count of technicain in ninjaone i want ?"
+    answer = asyncio.run(workflow.run_agent_workflow(
+        BrokenPlanner(), None, question, on_plan=plans.append
+    ))
+
+    assert answer == "Technician count retrieved by OLMo."
+    assert invoked["question"] == question
+    assert "planner_fallback" in plans[0]["status"]
+
+
+def test_planner_clarification_does_not_prevent_tool_agent_from_reasoning(monkeypatch):
+    class UncertainPlanner:
+        async def complete_json(self, system, prompt):
+            return {
+                "intent": "uncertain",
+                "tasks": ["retrieve requested NinjaOne data"],
+                "needs_clarification": True,
+                "clarification_question": "Please clarify.",
+            }
+
+    called = []
+
+    async def fake_tool_agent(llm, manager, question, **kwargs):
+        called.append(question)
+        return "OLMo resolved the request from the available API tools."
+
+    monkeypatch.setattr(workflow, "run_mcp_question", fake_tool_agent)
+    answer = asyncio.run(workflow.run_agent_workflow(
+        UncertainPlanner(), None, "count of technician in NinjaOne"
+    ))
+
+    assert called == ["count of technician in NinjaOne"]
+    assert answer == "OLMo resolved the request from the available API tools."
