@@ -1,99 +1,111 @@
-# Local OLMo NinjaOne Agent
+# Local OLMo NinjaOne Assistant
 
-This branch adds a separate read-only agent application. It does not modify the NinjaOne MCP Gateway implementation under src/ninja_mcp.
+The agent uses the existing local OLMo model and the NinjaOne API Gateway MCP server. It does not use cloud model APIs and does not replace the Gateway.
 
 ## Install
 
+Run from the repository root in Windows PowerShell:
+
     .\.venv\Scripts\python.exe -m pip install -r requirements-agent.txt
-    .\.venv\Scripts\python.exe -m pip install -e .
+    .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 
 ## Configuration
 
 The agent loads the repository-root .env without overwriting existing process variables.
 
-Optional settings:
-
     NINJA_AGENT_FOUNDRY_URL=http://127.0.0.1:64541/v1
     NINJA_AGENT_MODEL=olmo-3-7b-instruct-generic-gpu
     NINJA_AGENT_API_KEY=local
-    NINJA_AGENT_MCP_COMMAND=path-to-python.exe
+    NINJA_AGENT_MCP_COMMAND=C:\project\NinjaRMM-API-Gateway-MCP\.venv\Scripts\python.exe
     NINJA_AGENT_MCP_ARGS=-m ninja_mcp
     NINJA_AGENT_MAX_CANDIDATES=30
     NINJA_AGENT_MAX_PAGES=1000
     NINJA_AGENT_PAGE_SIZE=100
+    NINJA_AGENT_TIMEOUT=45
 
-The NinjaOne device API uses cursor pagination with `after` and `pageSize`; the agent requests 50 records per page and follows the last record ID. The default cap is 1,000 pages (up to 50,000 records), after which it reports an explicit partial result rather than inventing a total. The final short or empty page is fetched to confirm completion, including when the total is an exact multiple of 50.
+Keep NinjaOne credentials in .env or process environment. Never commit credentials.
 
-## Multiple MCP servers (Stage 1)
+## Run the assistant
 
-The agent now includes a generic MCP connection registry for multiple stdio servers. The default configuration remains the existing NinjaOne Gateway.
-
-To inspect the tools exposed by configured servers without executing them:
-
-    .\\.venv\\Scripts\\python.exe .\\ninjaone_agent.py --list-mcp-tools
-
-To add more MCP servers, set `NINJA_AGENT_MCP_SERVERS_JSON` in the process environment or repository-root `.env`. Example:
-
-    NINJA_AGENT_MCP_SERVERS_JSON=[{"name":"ninjaone","command":"C:\\project\\NinjaRMM-API-Gateway-MCP\\.venv\\Scripts\\python.exe","args":["-m","ninja_mcp"]},{"name":"filesystem","command":"node","args":["C:\\mcp\\filesystem\\server.js"],"env":{"FILESYSTEM_ROOT":"C:\\Data"}}]
-
-Each server name must be unique. Tools are registered with server-qualified names such as `ninjaone.list_devices` and `filesystem.read_file`, so identical tool names from different servers do not collide. If one server fails to connect, the registry reports that server as unavailable and continues connecting to the others.
-
-Stage 1 is discovery-only: `--list-mcp-tools` lists tool names, descriptions and input schemas. It does not execute tools. The existing NinjaOne question workflow remains unchanged in this stage.
-
-## Run
-
-Interactive:
+Start the interactive assistant:
 
     .\.venv\Scripts\python.exe .\ninjaone_agent.py
 
-Single question:
+The default interactive mode has two automatic paths:
+
+- **General chat:** greetings, explanations, troubleshooting guidance and normal follow-up conversation go directly to OLMo. No MCP call or planner call is made.
+- **NinjaOne operations:** requests for live tenant data are routed to the MCP tool agent. The MCP process starts only on the first operational request and stays connected for the rest of the session.
+
+Examples:
+
+    You: hi
+    Assistant: Hello! How can I help?
+
+    You: What is NinjaOne patch management?
+    Assistant: ...
+
+    You: Show me all devices
+    [MCP] Connecting to NinjaOne Gateway...
+    [MCP] Connected: ninjaone (5 tools discovered)
+    [MCP] Working...
+    Assistant: ...
+
+    You: Show me their details
+    Assistant: ...
+
+The router is intentionally lightweight and deterministic. It uses NinjaOne resource/action wording and the previous turn to recognize common operational follow-ups; it does not spend an extra model call classifying every message.
+
+## MCP tool access and safety
+
+The current NinjaOne Gateway exposes five tools to the OLMo agent:
+
+| Tool | Agent access |
+|---|---|
+| `discover_endpoints` | Allowed |
+| `inspect_endpoint` | Allowed |
+| `execute_endpoint` | GET only |
+| `execute_paginated_endpoint` | GET only |
+| `execute_raw_request` | GET only |
+
+The agent can discover and inspect the OpenAPI operations, then select the appropriate execution tool. Raw requests are permitted only when the request begins with `GET `. The Gateway remains the final authority for method, schema and approval checks.
+
+POST, PUT and PATCH are not automatically invoked by the agent. The Gateway requires a trusted, short-lived human approval token for those methods. DELETE is permanently blocked. Do not bypass these restrictions to make a demo appear more capable.
+
+For additional configured MCP servers, the default policy allows tools whose names use read-style prefixes such as `get_`, `list_`, `search_`, `read_`, `inspect_` and `fetch_`. Review each server's permissions before connecting write-capable tools.
+
+## Useful commands
+
+List tools and schemas without executing them:
+
+    .\.venv\Scripts\python.exe .\ninjaone_agent.py --list-mcp-tools
+
+Run one request directly through the generic MCP tool agent:
+
+    .\.venv\Scripts\python.exe .\ninjaone_agent.py --mcp-question "Find devices whose names start with 2QN"
+
+Run the legacy planner for comparison/backward compatibility:
 
     .\.venv\Scripts\python.exe .\ninjaone_agent.py --question "How many organizations and technicians do we have?"
 
-## Safety
+The default interactive command is the recommended showcase entry point. The legacy `--question` option is retained but is not the default chat workflow.
 
-Only discover_endpoints, inspect_endpoint, execute_endpoint and execute_paginated_endpoint are exposed to the agent. Execution is GET-only. The agent does not call execute_raw_request, POST, PUT, PATCH or DELETE. Gateway-side validation remains authoritative.
+## Performance and result correctness
+
+- The local model is initialized once per interactive session.
+- General chat does not start an MCP process.
+- The MCP connection is created on demand and reused across operational turns.
+- Tool schemas are compacted before being sent to OLMo; the full schema is still used for Python-side argument validation.
+- The tool loop is bounded (4 steps by default) and avoids repeating identical calls.
+- Record filters are applied deterministically in Python rather than asking OLMo to scan large JSON responses.
+- Pagination/completeness metadata must be preserved. Never report a partial page as a complete tenant-wide count.
+- Conversation context is bounded to the latest five turns to keep local inference prompts manageable.
 
 ## Tests
 
+Run all tests:
+
+    .\.venv\Scripts\python.exe -m pytest -q
+
+Run agent-specific tests:
+
     .\.venv\Scripts\python.exe -m pytest tests/agent -q
-
-Planner output is validated before use. API paths and parameters are selected from Gateway discovery and inspected against the OpenAPI schema. Device name filtering checks displayName, systemName, dnsName, netbiosName, name and hostname. Partial counts are never presented as confirmed totals.
-
-## Generic MCP question mode (Stage 2 initial slice)
-
-The generic selector can choose and invoke one relevant read-only tool from the configured MCP servers. It uses a lightweight lexical shortlist before asking OLMo to select a tool, validates required and unknown arguments against the discovered input schema, and uses server-qualified names.
-
-    .\\.venv\\Scripts\\python.exe .\\ninjaone_agent.py --mcp-question "Find the NinjaOne API endpoint for listing devices"
-
-This is an isolated test mode. The existing `--question` workflow remains the default and is unchanged. The first execution slice deliberately makes one tool call only; multi-step discovery/inspect/execute loops and additional result verification will be added after this mode is tested.
-
-The generic selector uses a conservative name-based read-only filter. For NinjaOne, only discovery/inspection and endpoint execution tools are candidates, and endpoint execution is additionally restricted to arguments beginning with `GET `. Gateway-side approval and method enforcement remain authoritative. Do not expose write-capable MCP servers to this mode until explicit per-tool permissions are configured.
-
-### Bounded MCP tool loop
-
-The generic `--mcp-question` mode now supports a bounded sequence of tool calls (maximum 4 by default): discover an API operation, inspect its schema, execute a GET request, then answer from the returned data. It prevents repeating an identical call in the same request and stops if OLMo selects an unknown tool or invalid action.
-
-The generic mode is still an initial read-only implementation. For NinjaOne, raw requests are blocked and endpoint execution must use a discovered `GET ` endpoint key. Other MCP servers are filtered by conservative read-style tool-name prefixes; do not connect write-capable servers to this mode until their tool permissions are explicitly reviewed.
-
-
-### Generic natural-language content filtering
-
-The generic --mcp-question agent can translate varied wording into reusable structured filters instead of relying on exact phrase matching. For example, 'begins with', 'starts with', and 'prefix' map to starts_with; 'includes', 'has', and 'contains' map to contains; 'exactly' maps to equals; and 'ends in' maps to ends_with.
-
-Filters are applied in Python to returned record collections, with case-insensitive matching and support for dotted/nested fields. Supported operators include equals, not_equals, contains, not_contains, starts_with, ends_with, in, not_in, numeric comparisons, and empty/not-empty checks. The agent records the number of records examined and matched. This keeps content matching deterministic and avoids asking the local model to scan every record itself.
-
-
-### Agent runtime design notes (Clawd-Code review)
-
-We reviewed the public GPT-AGI/Clawd-Code project as an architectural reference. We are adopting selected general patterns rather than importing its coding-CLI implementation:
-
-- A bounded multi-turn tool loop with a clear stop condition.
-- A central tool registry and full-schema validation at dispatch time.
-- A compact tool catalog for model context, while retaining full schemas locally for validation.
-- Explicit read-only permissions and safe execution boundaries.
-- Bounded tool-result history so local inference prompts stay manageable.
-
-The local OLMo agent also normalizes common malformed action variants (for example, a valid tool field paired with action=get or action=discover_endpoint). If a NinjaOne planning action omits a concrete tool, it safely falls back to endpoint discovery instead of executing a model-invented API path. Missing generic search-intent arguments such as intent/query are populated from the original user request only when required by the selected tool schema.
-
-Reference: https://github.com/GPT-AGI/Clawd-Code
