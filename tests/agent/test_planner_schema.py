@@ -53,3 +53,11 @@ def test_explicit_offline_device_count_keeps_filter():
     assert plan["tasks"][0]["filters"] == [
         {"field": "status", "operator": "eq", "value": "OFFLINE"}
     ]
+
+
+def test_systems_and_endpoints_are_normalized_to_ninjaone_devices():
+    from ninjaone_agent.planner import normalize_entity
+    assert normalize_entity("systems") == "devices"
+    assert normalize_entity("endpoints") == "devices"
+    assert normalize_entity("managed computers") == "devices"
+    assert normalize_entity("organizations") == "organizations"
