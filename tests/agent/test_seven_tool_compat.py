@@ -137,26 +137,33 @@ class CountManager:
         raise AssertionError(f"Unexpected tool call: {name}")
 
 
-class NoLLM:
+class ScriptedLLM:
+    def __init__(self, decisions):
+        self.decisions = list(decisions)
+
     async def complete_json(self, system, prompt):
-        raise AssertionError("Simple count should not call OLMo.")
+        assert self.decisions, "Unexpected extra OLMo decision"
+        return self.decisions.pop(0)
 
     async def complete(self, system, prompt, temperature=0.0):
-        raise AssertionError("Simple count should not call OLMo.")
+        return "OLMo final answer based on NinjaOne results."
 
 
-def test_plain_organization_count_uses_python_fast_path_without_llm():
+def test_plain_organization_count_uses_olmo_tool_reasoning():
     manager = CountManager()
 
-    answer = asyncio.run(
-        run_mcp_question(
-            NoLLM(),
-            manager,
-            "How many organizations do we have in NinjaOne?",
-        )
-    )
+    llm = ScriptedLLM([
+        {"action": "call", "tool": "ninjaone.find_endpoint", "arguments": {"query": "list organizations"}},
+        {"action": "call", "tool": "ninjaone.describe_endpoint", "arguments": {"endpoint": "GET /v2/organizations"}},
+        {"action": "call", "tool": "ninjaone.call", "arguments": {"endpoint": "GET /v2/organizations"}},
+        {"action": "final", "answer": "NinjaOne has 2 organizations."},
+    ])
+    answer = asyncio.run(run_mcp_question(
+        llm, manager, "How many organizations do we have in NinjaOne?"
+    ))
 
-    assert answer == "There are 2 organizations in NinjaOne."
+    assert answer == "NinjaOne has 2 organizations."
+    assert llm.decisions == []
     assert [name for name, _ in manager.calls] == [
         "ninjaone.find_endpoint",
         "ninjaone.describe_endpoint",
@@ -225,19 +232,17 @@ class NameManager(CountManager):
         raise AssertionError(f"Unexpected tool call: {name}")
 
 
-def test_simple_organization_name_lookup_uses_broad_discovery_without_llm():
+def test_simple_organization_name_lookup_uses_olmo_tool_reasoning():
     manager = NameManager()
-    answer = asyncio.run(
-        run_mcp_question(
-            NoLLM(),
-            manager,
-            "can i ninjaone oraganization name?",
-        )
-    )
-    assert "1. HOERBIGER" in answer
-    assert "2. HOERBIGER - Unattended" in answer
-    assert "Total: 2 organizations" in answer
-    assert manager.calls[0] == (
-        "ninjaone.find_endpoint",
-        {"query": "list organizations", "limit": 20},
-    )
+    llm = ScriptedLLM([
+        {"action": "call", "tool": "ninjaone.find_endpoint", "arguments": {"query": "organization names in NinjaOne"}},
+        {"action": "call", "tool": "ninjaone.describe_endpoint", "arguments": {"endpoint": "GET /v2/organizations"}},
+        {"action": "call", "tool": "ninjaone.call", "arguments": {"endpoint": "GET /v2/organizations"}},
+        {"action": "final", "answer": "NinjaOne has two organizations: HOERBIGER and HOERBIGER - Unattended."},
+    ])
+    answer = asyncio.run(run_mcp_question(
+        llm, manager, "can i ninjaone oraganization name?"
+    ))
+    assert "HOERBIGER" in answer
+    assert "HOERBIGER - Unattended" in answer
+    assert llm.decisions == []
