@@ -105,10 +105,10 @@ async def run_mcp_question(
 
     for step in range(max(1, min(max_steps, 6))):
         prompt = (
-            "USER REQUEST:\\n" + question +
-            "\\n\\nAVAILABLE TOOLS:\\n" + json.dumps(tool_catalog, ensure_ascii=False) +
-            "\\n\\nPREVIOUS TOOL RESULTS:\\n" + json.dumps(history, ensure_ascii=False, default=str) +
-            f"\\n\\nChoose the next action. This is step {step + 1} of {max_steps}."
+            "USER REQUEST:\n" + question +
+            "\n\nAVAILABLE TOOLS:\n" + json.dumps(tool_catalog, ensure_ascii=False) +
+            "\n\nPREVIOUS TOOL RESULTS:\n" + json.dumps(history, ensure_ascii=False, default=str) +
+            f"\n\nChoose the next action. This is step {step + 1} of {max_steps}."
         )
         decision = await llm.complete_json(system, prompt)
         if decision.get("action") == "final":
@@ -118,7 +118,7 @@ async def run_mcp_question(
             return "The agent did not provide a valid final answer."
 
         if decision.get("action") != "call":
-            return "OLMo returned an invalid action. No MCP tool was executed."
+            return ("OLMo returned an unsupported action: " + repr(decision.get("action")) + ". " + "Decision received: " + json.dumps(decision, ensure_ascii=False, default=str)[:1200] + ". No MCP tool was executed.")
 
         name = decision.get("tool")
         selected = next((item for item in shortlist if item.qualified_name == name), None)
@@ -155,7 +155,7 @@ async def run_mcp_question(
     )
     return await llm.complete(
         final_system,
-        "USER REQUEST:\\n" + question + "\\n\\nMCP TOOL RESULTS:\\n" +
+        "USER REQUEST:\n" + question + "\n\nMCP TOOL RESULTS:\n" +
         json.dumps(history, ensure_ascii=False, default=str)[:18000],
         temperature=0.1,
     )
