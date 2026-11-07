@@ -124,8 +124,13 @@ async def run_chat_session() -> int:
                     # request, then reuse the connection for the rest of the chat.
                     if manager is None:
                         print("[MCP] Connecting to NinjaOne Gateway...", flush=True)
-                        manager = MultiMCPManager(servers)
-                        await manager.__aenter__()
+                        candidate_manager = MultiMCPManager(servers)
+                        try:
+                            await candidate_manager.__aenter__()
+                        except Exception:
+                            manager = None
+                            raise
+                        manager = candidate_manager
                         status = manager.server_status()
                         print(
                             f"[MCP] Connected: {', '.join(status['connected'])} "
