@@ -230,3 +230,59 @@ def test_loop_does_not_execute_when_model_generates_unsupported_filter():
     assert manager.calls == [
         ("ninjaone.discover_endpoints", {"intent": "list devices"})
     ]
+
+
+
+def test_raw_request_is_available_for_get_only():
+    manager = FakeManager()
+    manager.tools.append(
+        _tool(
+            "execute_raw_request",
+            {
+                "type": "object",
+                "properties": {"request": {"type": "string"}},
+                "required": ["request"],
+            },
+        )
+    )
+    llm = FakeLLM([
+        {
+            "action": "call",
+            "tool": "ninjaone.execute_raw_request",
+            "arguments": {"request": "GET /v2/devices"},
+        },
+        {"action": "final", "answer": "GET request completed."},
+    ])
+
+    answer = asyncio.run(run_mcp_question(llm, manager, "Get devices"))
+
+    assert answer == "GET request completed."
+    assert manager.calls == [
+        ("ninjaone.execute_raw_request", {"request": "GET /v2/devices"})
+    ]
+
+
+def test_raw_request_blocks_post_before_gateway_execution():
+    manager = FakeManager()
+    manager.tools.append(
+        _tool(
+            "execute_raw_request",
+            {
+                "type": "object",
+                "properties": {"request": {"type": "string"}},
+                "required": ["request"],
+            },
+        )
+    )
+    llm = FakeLLM([
+        {
+            "action": "call",
+            "tool": "ninjaone.execute_raw_request",
+            "arguments": {"request": "POST /v2/devices"},
+        },
+    ])
+
+    with pytest.raises(PermissionError, match="GET-only"):
+        asyncio.run(run_mcp_question(llm, manager, "Create a device"))
+
+    assert manager.calls == []
