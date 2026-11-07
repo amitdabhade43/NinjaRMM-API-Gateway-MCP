@@ -176,3 +176,29 @@ def test_accessible_device_count_deduplicates_device_ids_across_matching_users()
         {"firstName": "Richard", "lastName": "O", "accessibleDeviceIds": [2, 3]},
     ]})
     assert result["count"] == 3
+
+
+def test_access_count_requires_clarification_when_multiple_people_match():
+    task = {"description": "Count devices accessible to Arthur", "operation": "count",
+            "filters": [{"field": "name", "operator": "contains", "value": "Arthur"}],
+            "count_field": "accessibleDeviceIds"}
+    result = process_result(task, {"complete": True, "data": [
+        {"id": 1, "firstName": "Arthur", "lastName": "Brown", "email": "arthur.brown@example.com",
+         "accessibleDeviceIds": [1, 2]},
+        {"id": 2, "firstName": "Arthur", "lastName": "Smith", "email": "arthur.smith@example.com",
+         "accessibleDeviceIds": [3]},
+    ]})
+    assert result["clarification_required"] is True
+    assert result["count"] is None
+    assert len(result["data"]) == 2
+
+
+def test_person_name_filter_tolerates_simple_typo():
+    task = {"description": "Find user", "operation": "list",
+            "filters": [{"field": "name", "operator": "contains", "value": "aurthur"}]}
+    result = process_result(task, {"complete": True, "data": [
+        {"id": 1, "firstName": "Arthur", "lastName": "Brown"},
+        {"id": 2, "firstName": "Maria", "lastName": "Jones"},
+    ]})
+    assert result["count"] == 1
+    assert result["data"][0]["id"] == 1
