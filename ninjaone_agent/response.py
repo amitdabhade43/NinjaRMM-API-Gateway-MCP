@@ -20,10 +20,15 @@ def format_fast(plan: dict[str, Any], results: list[dict[str, Any]]) -> str:
             lines.append(f"{task['description']}: Could not complete. {result.get('error', 'Unknown error')}")
             continue
         if result.get("clarification_required"):
-            lines.append(f"I found {result.get('matched_subjects', 0)} possible people matching that name.")
-            lines.append("Please choose the correct person using their full name, email address or user ID:")
-            for index, row in enumerate(result.get("data", [])[:20], start=1):
-                lines.append(f"{index}. {_compact_record(row)}")
+            matches = result.get("data", [])
+            if not matches:
+                lines.append("I could not find a matching person in the end-user records.")
+                lines.append("Please check the spelling or provide the person's email address.")
+            else:
+                lines.append(f"I found {result.get('matched_subjects', len(matches))} possible people matching that name.")
+                lines.append("Please choose the correct person using their full name, email address or user ID:")
+                for index, row in enumerate(matches[:20], start=1):
+                    lines.append(f"{index}. {_compact_record(row)}")
             continue
         count = result.get("count")
         complete = result.get("complete", True)
