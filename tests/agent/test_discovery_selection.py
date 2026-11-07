@@ -1,5 +1,6 @@
 from ninjaone_agent.discovery import choose_candidate
 
+
 def test_fuzzy_list_prefers_collection_endpoint_without_entity_specific_rules():
     candidates = [
         {"endpoint": "GET /v2/user/technician/{id}", "path": "/v2/user/technician/{id}"},
@@ -10,6 +11,7 @@ def test_fuzzy_list_prefers_collection_endpoint_without_entity_specific_rules():
     ]}, {"operation": "count", "identifier": None})
     assert selected["endpoint"] == "GET /v2/user/technicians"
 
+
 def test_details_prefers_item_endpoint_when_identifier_exists():
     candidates = [
         {"endpoint": "GET /v2/devices", "path": "/v2/devices"},
@@ -18,6 +20,7 @@ def test_details_prefers_item_endpoint_when_identifier_exists():
     selected = choose_candidate(candidates, {"mode": "fuzzy_fallback", "selected": []},
                                 {"operation": "details", "identifier": "ABC123"})
     assert selected["endpoint"] == "GET /v2/devices/{id}"
+
 
 def test_local_semantic_selection_is_respected():
     candidates = [
@@ -28,6 +31,7 @@ def test_local_semantic_selection_is_respected():
         {"endpoint": "GET /v2/organizations", "purpose": "organization collection"}
     ]}, {"operation": "list", "identifier": None})
     assert selected["endpoint"] == "GET /v2/organizations"
+
 
 def test_semantic_item_route_is_rejected_for_unscoped_collection_search():
     candidates = [
@@ -41,15 +45,13 @@ def test_semantic_item_route_is_rejected_for_unscoped_collection_search():
 
 
 def test_unscoped_search_never_falls_back_to_item_endpoint():
-    candidates = [
-        {"endpoint": "GET /v2/devices/{id}", "path": "/v2/devices/{id}"},
-    ]
+    candidates = [{"endpoint": "GET /v2/devices/{id}", "path": "/v2/devices/{id}"}]
     try:
         choose_candidate(candidates, {"mode": "fuzzy_fallback", "selected": []},
-                         {"operation": "list", "identifier": None})
+                         {"entity": "devices", "operation": "list", "identifier": None})
         assert False, "Expected collection endpoint selection to fail safely"
     except RuntimeError as exc:
-        assert "no device id" in str(exc).casefold()
+        assert "no collection get endpoint" in str(exc).casefold()
 
 
 def test_startswith_filter_is_case_insensitive():
@@ -72,3 +74,16 @@ def test_device_name_prefix_prefers_device_collection_not_search_endpoint():
          "filters": [{"field": "name", "operator": "startswith", "value": "2qn"}]},
     )
     assert selected["endpoint"] == "GET /v2/devices"
+
+
+def test_device_search_rejects_unrelated_organization_endpoint():
+    candidates = [
+        {"endpoint": "GET /v2/organization/documents", "path": "/v2/organization/documents"}
+    ]
+    try:
+        choose_candidate(candidates, {"mode": "local_semantic", "selected": [
+            {"endpoint": "GET /v2/organization/documents", "purpose": "organization documents"}
+        ]}, {"entity": "devices", "operation": "list", "identifier": None, "filters": []})
+        assert False, "Device search must not execute an organization endpoint"
+    except RuntimeError as exc:
+        assert "device collection endpoint" in str(exc).casefold()
