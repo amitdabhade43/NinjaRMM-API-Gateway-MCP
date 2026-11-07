@@ -25,11 +25,13 @@ Rules:
 - Interpret cont, cnt, count, how many, and number of as count intent.
 - "List all and count" means list_and_count. "Count only" means count and no list.
 - Show/list/get/find generally mean list; a specific identifier generally means details.
+- A device-name prefix request such as "names starting with 2qn" is a list request with filter field "name", operator "startswith", value "2qn".
+- NinjaOne device names may be stored as displayName, systemName, dnsName, or netbiosName. Keep the logical filter field as "name"; the result processor checks these documented fields.
 - Express conditions such as offline, enabled, disabled, open, closed, technician and end user as filters.
 - Technician-only requests must filter userType equal to TECHNICIAN; do not count END_USER records as technicians.
-- For “name starts with X” or “starting from X”, use a local filter with field `name`, operator `startswith`, and value X. Do not put X in path_params or query unless the inspected OpenAPI schema explicitly declares a matching parameter.
-- For searches across all devices, do not set an identifier. Discovery must choose a collection/list endpoint, not an endpoint requiring an `{id}` path value.
-- Never invent API paths, HTTP methods, parameter names, IDs or query values. Discovery and OpenAPI inspection happen later.
-- Preserve identifiers supplied by the user. Do not guess their field name.
+- For searches across all devices, do not set an identifier. The executor will select and paginate a collection endpoint.
+- Never invent API paths, HTTP methods, parameter names, IDs or query values.
+- Always leave path_params and query as empty objects. The executor derives valid API parameters only from the inspected OpenAPI schema.
+- Preserve identifiers supplied by the user in the identifier field. Do not guess their field name.
 - Use dependencies only when a later task genuinely needs an earlier task's output.
 - Keep plans small (normally 1-4 tasks, maximum 8). Never answer the factual question in the plan.
