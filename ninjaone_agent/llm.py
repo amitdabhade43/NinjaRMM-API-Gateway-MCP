@@ -86,9 +86,13 @@ class LocalLLM:
             try:
                 return self._parse_json_object(repaired)
             except ValueError as second_error:
+                first_excerpt = repr(raw[:1000])
+                repaired_excerpt = repr(repaired[:1000])
                 raise ValueError(
                     "OLMo returned invalid JSON twice; no MCP tool was executed. "
-                    f"First error: {first_error} Second error: {second_error}"
+                    f"First error: {first_error}; second error: {second_error}. "
+                    f"First response excerpt: {first_excerpt}. "
+                    f"Repair response excerpt: {repaired_excerpt}"
                 ) from second_error
 
     async def stream(self, system: str, user: str) -> AsyncIterator[str]:
