@@ -11,6 +11,7 @@ from typing import Any
 
 from .llm import LocalLLM
 from .mcp_registry import MCPToolInfo, MultiMCPManager
+from .content_filters import filter_result_payload, normalize_operator
 
 _WORDS = re.compile(r"[a-z0-9_]+")
 
@@ -100,10 +101,24 @@ async def run_mcp_question(
         "\"arguments\":{}} or {\"action\":\"final\",\"answer\":\"...\"}. "
         "The action field must be exactly call or final; never put a tool name "
         "in the action field. Put the selected tool name in the tool field. "
-        "Do not repeat a tool call with identical arguments."
+        "Do not repeat a tool call with identical arguments. "
+        "When the user asks to find, match, exclude, compare, or narrow records "
+        "by their content, include an optional filters array in the decision. "
+        "Translate equivalent wording into canonical operators: equals, "
+        "not_equals, contains, not_contains, starts_with, ends_with, in, "
+        "not_in, greater_than, greater_than_or_equal, less_than, "
+        "less_than_or_equal, is_empty, is_not_empty. Phrases like begins with, "
+        "starts with, prefix, and has prefix mean starts_with; includes, "
+        "contains, has, and mentions mean contains; exactly and matches mean "
+        "equals; ends in and suffix mean ends_with. Do not require an exact "
+        "keyword. Filter objects use field, operator, and value (value is "
+        "omitted only for empty checks). Filters are AND-combined. Only use "
+        "filters supported by the request and returned record fields."
     )
     history: list[dict[str, Any]] = []
     seen_calls: set[str] = set()
+    active_filters: list[dict[str, Any]] = []
+    filters_applied = False
 
     for step in range(max(1, min(max_steps, 6))):
         prompt = (
@@ -113,6 +128,21 @@ async def run_mcp_question(
             f"\n\nChoose the next action. This is step {step + 1} of {max_steps}."
         )
         decision = await llm.complete_json(system, prompt)
+        # Preserve structured content filters across discover/inspect/execute
+        # steps. Natural-language synonyms are normalized by the shared engine.
+        proposed_filters = decision.get("filters")
+        if isinstance(proposed_filters, list):
+            normalized_filters = []
+            for item in proposed_filters:
+                if not isinstance(item, dict):
+                    continue
+                normalized = dict(item)
+                if "operator" in normalized:
+                    normalized["operator"] = normalize_operator(normalized["operator"])
+                normalized_filters.append(normalized)
+            if normalized_filters:
+                active_filters = normalized_filters
+
         # Some OLMo responses use the selected tool name as the action
         # (for example, action="discover_endpoints") instead of action="call".
         # Normalize that shorthand only when it matches an approved tool.
@@ -170,11 +200,24 @@ async def run_mcp_question(
                     raise PermissionError("Only explicitly discovered GET endpoints may be executed.")
 
         result = await manager.call_tool(selected.qualified_name, arguments)
-        history.append({
+        entry: dict[str, Any] = {
             "tool": selected.qualified_name,
             "arguments": arguments,
             "result": result,
-        })
+        }
+        # Apply filters to actual returned records in Python, not by asking the
+        # LLM to visually scan a potentially large page of JSON.
+        if active_filters and not filters_applied:
+            try:
+                result, filter_summary = filter_result_payload(result, active_filters)
+                entry["result"] = result
+                entry["filter_summary"] = filter_summary
+                filters_applied = True
+            except ValueError:
+                # Discovery/inspection responses are not record collections.
+                # Keep the filters pending for the eventual data response.
+                pass
+        history.append(entry)
         # Keep the context bounded for local inference.
         history = history[-4:]
 
@@ -185,7 +228,9 @@ async def run_mcp_question(
     )
     return await llm.complete(
         final_system,
-        "USER REQUEST:\n" + question + "\n\nMCP TOOL RESULTS:\n" +
+        "USER REQUEST:\n" + question + "\n\nAPPLIED FILTERS:\n" +
+        json.dumps(active_filters, ensure_ascii=False, default=str) +
+        "\n\nMCP TOOL RESULTS:\n" +
         json.dumps(history, ensure_ascii=False, default=str)[:18000],
         temperature=0.1,
     )
