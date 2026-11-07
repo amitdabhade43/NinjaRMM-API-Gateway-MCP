@@ -35,13 +35,13 @@ def validate_plan(plan: dict[str, Any], original_question: str) -> dict[str, Any
                 continue
             clean_filters.append({"field": str(item["field"])[:100],
                                   "operator": operator, "value": item.get("value")})
-        path_params, query = task.get("path_params", {}), task.get("query", {})
+        # API parameter names and path values must come from the inspected OpenAPI
+        # schema, never from an LLM guess. Explicit identifiers are mapped later.
         normalized.append({
             "task_id": str(task.get("task_id") or f"task_{index}")[:40],
             "description": description, "entity": entity, "operation": operation,
             "filters": clean_filters, "identifier": task.get("identifier"),
-            "path_params": path_params if isinstance(path_params, dict) else {},
-            "query": query if isinstance(query, dict) else {},
+            "path_params": {}, "query": {},
             "depends_on": task.get("depends_on", []) if isinstance(task.get("depends_on", []), list) else [],
         })
     if not normalized:
