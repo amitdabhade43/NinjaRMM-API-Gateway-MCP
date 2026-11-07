@@ -16,6 +16,8 @@ def _matches(record: Any, condition: dict[str, Any]) -> bool:
     operator = condition.get("operator", "eq")
     if operator == "contains":
         return str(expected).casefold() in str(actual).casefold()
+    if operator == "startswith":
+        return str(actual).casefold().startswith(str(expected).casefold())
     if operator == "in":
         values = expected if isinstance(expected, list) else [expected]
         return any(str(actual).casefold() == str(value).casefold() for value in values)
