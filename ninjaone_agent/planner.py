@@ -12,13 +12,32 @@ _DEVICE_ENTITY_ALIASES = {"device", "devices", "system", "systems", "endpoint", 
 
 
 def normalize_entity(value: str) -> str:
-    """Normalize common endpoint-inventory wording to the provider entity."""
     cleaned = re.sub(r"[^a-z0-9]+", " ", value.casefold()).strip()
-    if cleaned in _DEVICE_ENTITY_ALIASES:
+    if cleaned in _DEVICE_ENTITY_ALIASES or any(token in _DEVICE_ENTITY_ALIASES for token in cleaned.split()):
         return "devices"
-    if any(token in _DEVICE_ENTITY_ALIASES for token in cleaned.split()):
-        return "devices"
+    if cleaned in {"end user", "end users", "users", "user"}:
+        return "end-users"
     return value.strip()[:100]
+
+
+def _requested_user_access_name(question: str) -> str | None:
+    patterns = (
+        r"\baccess\s+(.+?)\s+(?:has|have)\b",
+        r"\bdoes\s+(.+?)\s+(?:have|has)\s+access\b",
+        r"\b(.+?)\s+(?:has|have)\s+access\s+to\b",
+        r"\bdevices?\s+accessible\s+to\s+(.+?)(?:\?|$)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, question, re.I)
+        if match:
+            name = re.sub(r"\b(?:user|end user|in ninjaone|in ninjarmm)\b", " ", match.group(1), flags=re.I)
+            name = re.sub(r"[^\w.@' -]", " ", name).strip(" .?!,")
+            name = re.sub(r"\s+", " ", name)
+            if len(name.split()) >= 2 and len(name) <= 100:
+                return name
+    return None
+
+
 _FILTER_INTENT = re.compile(
     r"\b(offline|online|active|inactive|enabled|disabled|open|closed|with|whose|"
     r"starting|starts|beginning|ending|ends|assigned|unassigned|managed|unmanaged|"
@@ -55,18 +74,26 @@ def validate_plan(plan: dict[str, Any], original_question: str) -> dict[str, Any
                 continue
             clean_filters.append({"field": str(item["field"])[:100],
                                   "operator": operator, "value": item.get("value")})
-        # "How many X?" means the unfiltered total unless the user states
-        # a condition. Do not allow a planner-generated default filter to
-        # silently turn an inventory count into a filtered count.
         if operation == "count" and not explicit_filter_intent:
             clean_filters = []
         normalized.append({
             "task_id": str(task.get("task_id") or f"task_{index}")[:40],
             "description": description, "entity": entity, "operation": operation,
             "filters": clean_filters, "identifier": task.get("identifier"),
-            "path_params": {}, "query": {},
+            "path_params": {}, "query": {}, "count_field": None,
             "depends_on": task.get("depends_on", []) if isinstance(task.get("depends_on", []), list) else [],
         })
+
+    access_name = _requested_user_access_name(original_question)
+    if access_name:
+        normalized = [{
+            "task_id": "task_user_device_access",
+            "description": f"Count devices accessible to {access_name}",
+            "entity": "end-users", "operation": "count",
+            "filters": [{"field": "name", "operator": "contains", "value": access_name}],
+            "identifier": None, "path_params": {}, "query": {},
+            "count_field": "accessibleDeviceIds", "depends_on": [],
+        }]
     if not normalized:
         raise ValueError("Planner returned no valid tasks.")
     response_format = str(plan.get("response_format", "summary")).lower()
