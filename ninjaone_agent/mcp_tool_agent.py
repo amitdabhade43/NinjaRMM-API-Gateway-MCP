@@ -21,7 +21,7 @@ _READ_PREFIXES = ("get_", "list_", "search_", "find_", "read_", "inspect_",
                   "discover_", "describe_", "query_", "fetch_", "lookup_")
 _NINJAONE_SAFE_TOOLS = {
     "discover_endpoints", "inspect_endpoint", "execute_endpoint",
-    "execute_paginated_endpoint",
+    "execute_paginated_endpoint", "execute_raw_request",
 }
 
 
@@ -175,6 +175,7 @@ async def run_mcp_question(
     manager: MultiMCPManager,
     question: str,
     max_steps: int = 4,
+    conversation_context: str = "",
 ) -> str:
     """Run a bounded discover/inspect/execute loop over safe MCP tools."""
     all_tools = manager.list_tools()
@@ -201,7 +202,8 @@ async def run_mcp_question(
         "records, or results. First discover an API operation when needed, "
         "inspect its schema before execution when parameters are not clear, "
         "then execute only a GET operation. Never call write, create, update, "
-        "delete, raw-request, or action tools. Return JSON only in one of these "
+        "delete, or action tools. execute_raw_request may be used only for a "
+        "concrete GET request that matches the OpenAPI specification. Return JSON only in one of these "
         "forms: {\"action\":\"call\",\"tool\":\"server.tool\","
         "\"arguments\":{}} or {\"action\":\"final\",\"answer\":\"...\"}. "
         "The action field must be exactly call or final; never put a tool name "
@@ -300,7 +302,9 @@ async def run_mcp_question(
 
         if selected.server.casefold() == "ninjaone":
             if selected.name == "execute_raw_request":
-                raise PermissionError("Raw NinjaOne requests are not permitted in generic mode.")
+                request = arguments.get("request")
+                if not isinstance(request, str) or not request.lstrip().upper().startswith("GET "):
+                    raise PermissionError("Raw NinjaOne requests are GET-only in generic mode.")
             if selected.name in {"execute_endpoint", "execute_paginated_endpoint"}:
                 endpoint = arguments.get("endpoint")
                 if not isinstance(endpoint, str) or not endpoint.lstrip().upper().startswith("GET "):
