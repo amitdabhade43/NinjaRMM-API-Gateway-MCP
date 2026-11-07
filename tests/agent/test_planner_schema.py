@@ -76,3 +76,13 @@ def test_person_device_access_question_becomes_end_user_relationship_count():
 def test_standard_person_access_wording_is_understood():
     from ninjaone_agent.planner import _requested_user_access_name
     assert _requested_user_access_name("how many systems does Richard O have access to?") == "Richard O"
+
+
+def test_single_token_person_name_is_extracted_from_device_access_question():
+    from ninjaone_agent.planner import _requested_user_access_name, validate_plan
+    question = "how many device access aurthur have"
+    assert _requested_user_access_name(question) == "aurthur"
+    plan = validate_plan({"tasks": [{"entity": "devices", "operation": "count"}]}, question)
+    assert plan["tasks"][0]["entity"] == "end-users"
+    assert plan["tasks"][0]["count_field"] == "accessibleDeviceIds"
+    assert plan["tasks"][0]["filters"][0]["value"] == "aurthur"
