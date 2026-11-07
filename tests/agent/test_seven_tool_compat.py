@@ -5,9 +5,12 @@ import pytest
 from ninjaone_agent.mcp_registry import MCPToolInfo
 from ninjaone_agent.mcp_tool_agent import (
     _simple_count_resource,
+    _simple_name_resource,
     is_read_only_candidate,
     run_mcp_question,
 )
+from ninjaone_agent.llm import LocalLLM
+from ninjaone_agent.chat import should_use_mcp
 
 
 SEVEN_TOOLS = {
@@ -165,3 +168,76 @@ def test_simple_count_detection_rejects_filtered_questions():
     assert _simple_count_resource("How many organizations do we have in NinjaOne?") == "organizations"
     assert _simple_count_resource("Count all devices") == "devices"
     assert _simple_count_resource("How many devices are offline?") is None
+
+
+
+def test_organization_name_question_with_typo_routes_to_mcp():
+    question = "can i ninjaone oraganization name?"
+    assert should_use_mcp(question) is True
+    assert _simple_name_resource(question) == "organizations"
+
+
+def test_local_llm_repairs_missing_quote_before_json_key_colon():
+    malformed = '{"action":"call","tool":"ninjaone.find_endpoint","arguments":{"query:"organization name in NinjaOne"}}'
+    parsed = LocalLLM._parse_json_object(malformed)
+    assert parsed["arguments"]["query"] == "organization name in NinjaOne"
+
+
+class NameManager(CountManager):
+    async def call_tool(self, name, arguments):
+        self.calls.append((name, arguments))
+        if name == "ninjaone.find_endpoint":
+            return {
+                "count": 2,
+                "results": [
+                    {
+                        "endpoint": "GET /v2/organizations",
+                        "method": "GET",
+                        "path": "/v2/organizations",
+                        "summary": "List organizations",
+                        "category": "Organizations",
+                    },
+                    {
+                        "endpoint": "POST /v2/organizations",
+                        "method": "POST",
+                        "path": "/v2/organizations",
+                        "summary": "Create organization",
+                        "category": "Organizations",
+                    },
+                ],
+            }
+        if name == "ninjaone.describe_endpoint":
+            return {
+                "method": "GET",
+                "path": "/v2/organizations",
+                "parameters": [],
+            }
+        if name == "ninjaone.call":
+            return {
+                "endpoint": "GET /v2/organizations",
+                "executed": True,
+                "complete": True,
+                "data": [
+                    {"id": 6, "name": "HOERBIGER"},
+                    {"id": 7, "name": "HOERBIGER - Unattended"},
+                ],
+            }
+        raise AssertionError(f"Unexpected tool call: {name}")
+
+
+def test_simple_organization_name_lookup_uses_broad_discovery_without_llm():
+    manager = NameManager()
+    answer = asyncio.run(
+        run_mcp_question(
+            NoLLM(),
+            manager,
+            "can i ninjaone oraganization name?",
+        )
+    )
+    assert "1. HOERBIGER" in answer
+    assert "2. HOERBIGER - Unattended" in answer
+    assert "Total: 2 organizations" in answer
+    assert manager.calls[0] == (
+        "ninjaone.find_endpoint",
+        {"query": "list organizations", "limit": 20},
+    )
