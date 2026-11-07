@@ -2,7 +2,7 @@
 from __future__ import annotations
 import asyncio
 import re
-from typing import Any
+from typing import Any, Callable
 from .config import AgentConfig
 from .discovery import discover_for_task
 from .mcp_gateway import GatewayConnection
@@ -64,8 +64,17 @@ async def execute_task(gateway: GatewayConnection, config: AgentConfig,
         return {"task": task, "status": "error", "error": str(exc)}
 
 async def execute_plan(gateway: GatewayConnection, config: AgentConfig,
-                       plan: dict[str, Any]) -> list[dict[str, Any]]:
+                       plan: dict[str, Any],
+                       on_task_complete: Callable[[dict[str, Any]], None] | None = None
+                       ) -> list[dict[str, Any]]:
     tasks = plan["tasks"]
+
+    async def run_one(task: dict[str, Any]):
+        result = await execute_task(gateway, config, task)
+        if on_task_complete:
+            on_task_complete(result)
+        return task["task_id"], result
+
     if any(task.get("depends_on") for task in tasks):
         completed: dict[str, dict[str, Any]] = {}
         pending = list(tasks)
@@ -73,9 +82,15 @@ async def execute_plan(gateway: GatewayConnection, config: AgentConfig,
             ready = [task for task in pending if all(dep in completed for dep in task["depends_on"])]
             if not ready:
                 raise RuntimeError("Task plan contains an unresolved dependency or cycle.")
-            results = await asyncio.gather(*(execute_task(gateway, config, task) for task in ready))
-            for task, result in zip(ready, results):
-                completed[task["task_id"]] = result
-                pending.remove(task)
+            pairs = await asyncio.gather(*(run_one(task) for task in ready))
+            for task_id, result in pairs:
+                completed[task_id] = result
+            pending = [task for task in pending if task["task_id"] not in completed]
         return [completed[task["task_id"]] for task in tasks]
-    return list(await asyncio.gather(*(execute_task(gateway, config, task) for task in tasks)))
+
+    running = [asyncio.create_task(run_one(task)) for task in tasks]
+    completed_results = {}
+    for future in asyncio.as_completed(running):
+        task_id, result = await future
+        completed_results[task_id] = result
+    return [completed_results[task["task_id"]] for task in tasks]

@@ -21,7 +21,15 @@ async def run_question(question: str) -> int:
         print(f"Plan ready: {len(plan['tasks'])} task(s). Connecting to NinjaOne Gateway...", flush=True)
         async with GatewayConnection(config) as gateway:
             print("Gateway connected. Executing read-only tasks...", flush=True)
-            results = await execute_plan(gateway, config, plan)
+            def show_progress(result):
+                task = result["task"]
+                if result.get("status") == "success" and "count" in result:
+                    print(f"[completed] {task['description']}: {result['count']}", flush=True)
+                elif result.get("status") == "success":
+                    print(f"[completed] {task['description']}", flush=True)
+                else:
+                    print(f"[failed] {task['description']}: {result.get('error')}", flush=True)
+            results = await execute_plan(gateway, config, plan, on_task_complete=show_progress)
         print("\nResult\n------", flush=True)
         print(await format_response(llm, plan, results), flush=True)
         return 0 if all(item.get("status") == "success" for item in results) else 1
