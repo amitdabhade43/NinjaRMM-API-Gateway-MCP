@@ -80,6 +80,30 @@ def test_loop_normalizes_tool_name_returned_as_action():
     ]
 
 
+def test_loop_maps_choose_endpoint_to_ninjaone_discovery():
+    manager = FakeManager()
+    llm = FakeLLM([
+        {
+            "action": "choose_endpoint",
+            "description": "Select a suitable OpenAPI endpoint",
+            "operation": "list",
+        },
+        {"action": "final", "answer": "Endpoint discovery completed."},
+    ])
+
+    answer = asyncio.run(
+        run_mcp_question(llm, manager, "Find devices whose names start with 2QN")
+    )
+
+    assert answer == "Endpoint discovery completed."
+    assert manager.calls == [
+        (
+            "ninjaone.discover_endpoints",
+            {"intent": "Find devices whose names start with 2QN"},
+        )
+    ]
+
+
 def test_loop_blocks_non_get_ninjaone_endpoint():
     manager = FakeManager()
     llm = FakeLLM([
