@@ -29,6 +29,137 @@ _NINJAONE_SAFE_TOOLS = {
 }
 
 
+
+_NINJAONE_COMPAT_TOOLS = {
+    "find_endpoint", "describe_endpoint", "call", "raw_call",
+    "memory_save", "memory_list", "memory_delete",
+}
+
+# Simple, unfiltered counts can be handled deterministically without asking
+# OLMo to plan, inspect, execute, and then summarize the same request.
+_COUNT_RESOURCES = {
+    "organization": "organizations", "organizations": "organizations",
+    "org": "organizations", "orgs": "organizations",
+    "device": "devices", "devices": "devices",
+    "user": "users", "users": "users",
+    "technician": "technicians", "technicians": "technicians",
+    "location": "locations", "locations": "locations",
+    "group": "groups", "groups": "groups",
+    "role": "roles", "roles": "roles",
+    "alert": "alerts", "alerts": "alerts",
+    "policy": "policies", "policies": "policies",
+}
+_COUNT_FILLER_WORDS = {
+    "how", "many", "count", "number", "of", "total", "do", "we", "have",
+    "in", "ninjaone", "ninja", "one", "the", "all", "what", "are", "is",
+    "there", "currently",
+}
+
+
+def _simple_count_resource(question: str) -> str | None:
+    """Return a resource only for a plain, unfiltered count request."""
+    if not re.search(r"\b(how\s+many|count|number\s+of|total)\b", question, re.I):
+        return None
+    words = set(_WORDS.findall(question.casefold()))
+    resources = words & set(_COUNT_RESOURCES)
+    if len(resources) != 1 or words - _COUNT_FILLER_WORDS - resources:
+        return None
+    return _COUNT_RESOURCES[next(iter(resources))]
+
+
+def _count_collection(payload: Any, resource: str) -> list[Any] | None:
+    """Extract an unambiguous collection from the Gateway response envelope."""
+    if not isinstance(payload, dict) or payload.get("error"):
+        return None
+    data = payload.get("data", payload)
+    if isinstance(data, list):
+        return data
+    if not isinstance(data, dict):
+        return None
+    preferred = {
+        resource, resource.rstrip("s"), "results", "items", "data",
+    }
+    for key in preferred:
+        value = data.get(key)
+        if isinstance(value, list):
+            return value
+    arrays = [value for value in data.values() if isinstance(value, list)]
+    return arrays[0] if len(arrays) == 1 else None
+
+
+async def _fast_count_with_compat_tools(
+    manager: MultiMCPManager, resource: str
+) -> str:
+    """Discover and count a plain collection using Python, with no extra LLM call."""
+    available = {tool.qualified_name for tool in manager.list_tools()}
+    required_tools = {
+        "ninjaone.find_endpoint",
+        "ninjaone.describe_endpoint",
+        "ninjaone.call",
+    }
+    if not required_tools.issubset(available):
+        return "The fast count path is unavailable because the NinjaOne compatibility tools are incomplete."
+
+    discovery = await manager.call_tool(
+        "ninjaone.find_endpoint",
+        {"query": f"list {resource}", "method": "GET", "limit": 20},
+    )
+    candidates = discovery.get("results", []) if isinstance(discovery, dict) else []
+    singular = resource[:-1] if resource.endswith("s") else resource
+    selected_endpoint = None
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        endpoint = candidate.get("endpoint")
+        method = str(candidate.get("method", "")).upper()
+        searchable = " ".join(str(candidate.get(key, "")) for key in (
+            "path", "summary", "operation_id", "category", "endpoint"
+        )).casefold()
+        if (
+            isinstance(endpoint, str)
+            and (method == "GET" or endpoint.upper().startswith("GET "))
+            and (resource in searchable or singular in searchable)
+        ):
+            selected_endpoint = endpoint
+            break
+
+    if not selected_endpoint:
+        return f"I couldn't safely identify a GET endpoint for counting {resource}."
+
+    detail = await manager.call_tool(
+        "ninjaone.describe_endpoint", {"endpoint": selected_endpoint}
+    )
+    if not isinstance(detail, dict) or str(detail.get("method", "")).upper() != "GET":
+        return f"The discovered endpoint {selected_endpoint} could not be verified as a GET operation."
+    if "{" in str(detail.get("path", "")) or "}" in str(detail.get("path", "")):
+        return f"The endpoint {selected_endpoint} requires path parameters, so I did not execute it."
+    required_parameters = [
+        item for item in detail.get("parameters", [])
+        if isinstance(item, dict) and item.get("required")
+    ]
+    if required_parameters:
+        names = ", ".join(str(item.get("name", "unknown")) for item in required_parameters)
+        return f"The endpoint {selected_endpoint} requires parameters ({names}); I did not guess their values."
+
+    result = await manager.call_tool(
+        "ninjaone.call", {"endpoint": selected_endpoint}
+    )
+    if isinstance(result, dict) and result.get("error"):
+        return f"NinjaOne returned an error while counting {resource}: {result['error']}"
+    records = _count_collection(result, resource)
+    if records is None:
+        return (
+            f"I retrieved {selected_endpoint}, but its response did not contain "
+            "an unambiguous record collection to count."
+        )
+
+    count = len(records)
+    if isinstance(result, dict) and (result.get("truncated") or result.get("complete") is False):
+        return f"At least {count} {resource} were returned; the response was incomplete, so this may not be the total."
+    label = resource[:-1] if count == 1 and resource.endswith("s") else resource
+    return f"There are {count} {label} in NinjaOne."
+
+
 def is_read_only_candidate(tool: MCPToolInfo) -> bool:
     if tool.server.casefold() == "ninjaone":
         return tool.name in _NINJAONE_SAFE_TOOLS
@@ -130,7 +261,7 @@ def _normalize_decision(
         selected = next(
             (tool for tool in shortlist
              if tool.server.casefold() == "ninjaone"
-             and tool.name == "discover_endpoints"),
+             and tool.name in {"find_endpoint", "discover_endpoints"}),
             None,
         )
         if selected is not None:
@@ -183,14 +314,36 @@ async def run_mcp_question(
 ) -> str:
     """Run a bounded discover/inspect/execute loop over safe MCP tools."""
     all_tools = manager.list_tools()
-    shortlist = rank_tools(question, all_tools)
-    # The NinjaOne Gateway exposes a small set of workflow tools. Keep those
-    # available together so OLMo can discover, inspect, then execute an API.
-    for item in all_tools:
-        if item.server.casefold() == "ninjaone" and is_read_only_candidate(item):
+
+    # Fast path: plain collection counts need no planning or answer-generation
+    # inference. Python discovers, verifies, executes and counts through the
+    # seven-tool compatibility surface.
+    count_resource = _simple_count_resource(question)
+    if count_resource:
+        available_names = {tool.qualified_name for tool in all_tools}
+        if {
+            "ninjaone.find_endpoint",
+            "ninjaone.describe_endpoint",
+            "ninjaone.call",
+        }.issubset(available_names):
+            try:
+                return await _fast_count_with_compat_tools(manager, count_resource)
+            except Exception as exc:
+                return f"Unable to complete the NinjaOne count: {type(exc).__name__}: {exc}"
+
+    # Present only the seven compatibility tools to OLMo. The original
+    # Gateway tools remain registered and available, but duplicate aliases
+    # are not added to the model's decision prompt.
+    agent_tools = [
+        item for item in all_tools
+        if item.server.casefold() != "ninjaone"
+        or item.name in _NINJAONE_COMPAT_TOOLS
+    ]
+    shortlist = rank_tools(question, agent_tools)
+    for item in agent_tools:
+        if item.server.casefold() == "ninjaone" and item.name in _NINJAONE_COMPAT_TOOLS:
             if item not in shortlist:
                 shortlist.append(item)
-    shortlist = shortlist[:max(16, len(shortlist))]
 
     if not shortlist:
         return "I couldn't find a suitable read-only MCP tool for that request."
@@ -317,7 +470,7 @@ async def run_mcp_question(
                 endpoint = arguments.get("endpoint")
                 if not isinstance(endpoint, str) or not endpoint.lstrip().upper().startswith("GET "):
                     raise PermissionError("Only explicitly discovered GET endpoints may be executed.")
-            if selected.name == "memory_save" and not re.search(r"\b(save|remember|store)\\b", question, re.I):
+            if selected.name == "memory_save" and not re.search(r"\b(save|remember|store)\b", question, re.I):
                 raise PermissionError("Save a query template only when the user explicitly asks to save or remember it.")
             if selected.name == "memory_list" and not re.search(
                 r"\b(saved queries|saved searches|saved query templates|memories)\\b", question, re.I
