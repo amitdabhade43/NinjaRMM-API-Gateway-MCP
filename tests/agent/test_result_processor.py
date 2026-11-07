@@ -1,6 +1,70 @@
 import pytest
+from types import SimpleNamespace
+from ninjaone_agent.executor import _cursor_pagination, _execute_cursor_pages
 from ninjaone_agent.result_processor import process_result
 from ninjaone_agent.response import format_fast
+
+
+def test_cursor_pagination_does_not_depend_on_description_wording():
+    detail = {"parameters": [
+        {"name": "after", "in": "query", "description": "Cursor for the next request"},
+        {"name": "pageSize", "in": "query", "description": "Maximum number of records"},
+    ]}
+    assert _cursor_pagination(detail) == ("after", "pageSize")
+
+
+def test_cursor_pagination_is_case_insensitive_for_schema_names():
+    detail = {"parameters": [
+        {"name": "AFTER", "in": "query"},
+        {"name": "PAGESIZE", "in": "query"},
+    ]}
+    assert _cursor_pagination(detail) == ("AFTER", "PAGESIZE")
+
+
+def test_cursor_pagination_requires_both_declared_query_parameters():
+    assert _cursor_pagination({"parameters": [{"name": "after", "in": "query"}]}) is None
+    assert _cursor_pagination({"parameters": [{"name": "pageSize", "in": "query"}]}) is None
+
+
+@pytest.mark.asyncio
+async def test_cursor_pagination_checks_empty_page_after_exact_multiple():
+    class FakeGateway:
+        def __init__(self):
+            self.calls = []
+        async def call(self, name, args):
+            self.calls.append(args)
+            if len(self.calls) <= 2:
+                start = (len(self.calls) - 1) * 50 + 1
+                return {"endpoint": "GET /v2/devices", "complete": True,
+                        "data": [{"id": i, "displayName": f"PC-{i}"} for i in range(start, start + 50)]}
+            return {"endpoint": "GET /v2/devices", "complete": True, "data": []}
+
+    gateway = FakeGateway()
+    result = await _execute_cursor_pages(
+        gateway, SimpleNamespace(page_size=100, max_pages=10),
+        "GET /v2/devices", {}, {}, ("after", "pageSize")
+    )
+    assert result["complete"] is True
+    assert result["items_fetched"] == 100
+    assert result["pages_fetched"] == 3
+    assert gateway.calls[2]["query"] == {"pageSize": 50, "after": 100}
+
+
+@pytest.mark.asyncio
+async def test_cursor_pagination_marks_page_limit_as_partial():
+    class FakeGateway:
+        async def call(self, name, args):
+            after = (args.get("query") or {}).get("after", 0)
+            return {"endpoint": "GET /v2/devices", "complete": True,
+                    "data": [{"id": after + i, "displayName": f"PC-{after+i}"} for i in range(1, 51)]}
+
+    result = await _execute_cursor_pages(
+        FakeGateway(), SimpleNamespace(page_size=50, max_pages=2),
+        "GET /v2/devices", {}, {}, ("after", "pageSize")
+    )
+    assert result["complete"] is False
+    assert result["max_pages_reached"] is True
+    assert result["items_fetched"] == 100
 
 
 def test_count_applies_filter_before_counting():
@@ -84,59 +148,3 @@ def test_incomplete_metadata_is_preserved():
     })
     assert result["complete"] is False
     assert result["truncated"] is True
-
-
-@pytest.mark.asyncio
-async def test_cursor_pagination_uses_last_device_id():
-    from types import SimpleNamespace
-    from ninjaone_agent.executor import _execute_cursor_pages
-
-    class FakeGateway:
-        def __init__(self):
-            self.calls = []
-        async def call(self, name, args):
-            self.calls.append((name, args))
-            if len(self.calls) == 1:
-                return {"endpoint": "GET /v2/devices", "complete": True,
-                        "data": [{"id": i, "displayName": f"PC-{i}"} for i in range(1, 51)]}
-            return {"endpoint": "GET /v2/devices", "complete": True,
-                    "data": [{"id": 51, "displayName": "2qn-PC-51"}]}
-
-    gateway = FakeGateway()
-    config = SimpleNamespace(page_size=100, max_pages=10)
-    result = await _execute_cursor_pages(
-        gateway, config, "GET /v2/devices", {}, {}, ("after", "pageSize")
-    )
-    assert result["complete"] is True
-    assert result["pages_fetched"] == 2
-    assert result["items_fetched"] == 51
-    assert gateway.calls[0][1]["query"] == {"pageSize": 50}
-    assert gateway.calls[1][1]["query"] == {"pageSize": 50, "after": 50}
-
-
-@pytest.mark.asyncio
-async def test_cursor_pagination_continues_after_gateway_page_wrapper():
-    from types import SimpleNamespace
-    from ninjaone_agent.executor import _execute_cursor_pages
-
-    class FakeGateway:
-        def __init__(self):
-            self.calls = []
-        async def call(self, name, args):
-            self.calls.append(args)
-            if len(self.calls) == 1:
-                return {"endpoint": "GET /v2/devices", "complete": False,
-                        "data": {"_truncated": True, "items": [
-                            {"id": i, "displayName": f"PC-{i}"} for i in range(1, 51)
-                        ]}}
-            return {"endpoint": "GET /v2/devices", "complete": True,
-                    "data": [{"id": 51, "displayName": "PC-51"}]}
-
-    gateway = FakeGateway()
-    result = await _execute_cursor_pages(
-        gateway, SimpleNamespace(page_size=100, max_pages=10),
-        "GET /v2/devices", {}, {}, ("after", "pageSize")
-    )
-    assert result["complete"] is True
-    assert result["items_fetched"] == 51
-    assert gateway.calls[1]["query"]["after"] == 50
