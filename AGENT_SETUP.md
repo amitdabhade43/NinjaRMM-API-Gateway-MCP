@@ -46,7 +46,7 @@ Examples:
 
     You: Show me all devices
     [MCP] Connecting to NinjaOne Gateway...
-    [MCP] Connected: ninjaone (5 tools discovered)
+    [MCP] Connected: ninjaone (12 tools discovered)
     [MCP] Working...
     Assistant: ...
 
@@ -57,19 +57,23 @@ The router is intentionally lightweight and deterministic. It uses NinjaOne reso
 
 ## MCP tool access and safety
 
-The current NinjaOne Gateway exposes five tools to the OLMo agent:
+The Gateway exposes the original five workflow tools plus seven compatibility tools inspired by the reference repository:
 
-| Tool | Agent access |
+| Compatibility tool | Purpose |
 |---|---|
-| `discover_endpoints` | Allowed |
-| `inspect_endpoint` | Allowed |
-| `execute_endpoint` | GET only |
-| `execute_paginated_endpoint` | GET only |
-| `execute_raw_request` | GET only |
+| `find_endpoint` | Fuzzy search for a NinjaOne API operation |
+| `describe_endpoint` | Inspect exact endpoint parameters and schemas |
+| `call` | Execute a documented endpoint |
+| `raw_call` | Execute a concrete relative API path |
+| `memory_save` | Save a reusable GET query template locally |
+| `memory_list` | List saved query templates |
+| `memory_delete` | Delete a saved query template |
 
-The agent can discover and inspect the OpenAPI operations, then select the appropriate execution tool. Raw requests are permitted only when the request begins with `GET `. The Gateway remains the final authority for method, schema and approval checks.
+The original `discover_endpoints`, `inspect_endpoint`, `execute_endpoint`, `execute_paginated_endpoint` and `execute_raw_request` tools remain available. The compatibility tools are thin aliases over the same OpenAPI-driven Gateway; they do not add endpoint coverage or create a second API client.
 
-POST, PUT and PATCH are not automatically invoked by the agent. The Gateway requires a trusted, short-lived human approval token for those methods. DELETE is permanently blocked. Do not bypass these restrictions to make a demo appear more capable.
+The OLMo agent may execute only GET requests against the NinjaOne tenant. Both `call` and `raw_call` are subject to that rule. Saved-query memory is local to the machine (default: `~/.ninjaone_agent/saved_queries.json`) and stores only the endpoint plus path/query parameters and a description—not tenant response data or credentials. Saving or deleting a template requires explicit user wording.
+
+The Gateway remains the final authority for method, schema and approval checks. POST, PUT and PATCH still require a trusted, short-lived human approval token; DELETE remains blocked. We are not weakening these existing protections as part of the functionality work.
 
 For additional configured MCP servers, the default policy allows tools whose names use read-style prefixes such as `get_`, `list_`, `search_`, `read_`, `inspect_` and `fetch_`. Review each server's permissions before connecting write-capable tools.
 
