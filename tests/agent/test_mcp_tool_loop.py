@@ -176,3 +176,30 @@ def test_loop_accepts_approved_tool_field_even_when_action_is_not_call():
     assert manager.calls == [
         ("ninjaone.discover_endpoints", {"intent": "list devices"})
     ]
+
+
+
+def test_loop_returns_argument_validation_feedback_to_model():
+    manager = FakeManager()
+    llm = FakeLLM([
+        {
+            "action": "call",
+            "tool": "ninjaone.inspect_endpoint",
+            "arguments": {},
+        },
+        {
+            "action": "call",
+            "tool": "ninjaone.inspect_endpoint",
+            "arguments": {"endpoint": "GET /v2/devices"},
+        },
+        {"action": "final", "answer": "Inspection completed."},
+    ])
+
+    answer = asyncio.run(
+        run_mcp_question(llm, manager, "Inspect the devices endpoint")
+    )
+
+    assert answer == "Inspection completed."
+    assert manager.calls == [
+        ("ninjaone.inspect_endpoint", {"endpoint": "GET /v2/devices"})
+    ]
