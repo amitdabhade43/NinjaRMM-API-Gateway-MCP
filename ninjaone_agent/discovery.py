@@ -52,6 +52,12 @@ def choose_candidate(candidates: list[dict[str, Any]], semantic: dict[str, Any],
     if not collection_pool:
         raise RuntimeError("No collection GET endpoint was discovered; an item-detail endpoint cannot answer an unscoped request.")
 
+    if entity in {"end-users", "users"}:
+        exact = [item for item in collection_pool if _candidate_path(item).casefold().endswith("/user/end-users")]
+        if exact:
+            return exact[0]
+        raise RuntimeError("Gateway discovery did not return the NinjaOne end-user collection endpoint. No unrelated endpoint was called.")
+
     if "device" in entity:
         # Never execute an unrelated semantic match (e.g. organization documents)
         # for a device inventory request.
@@ -81,11 +87,21 @@ async def discover_for_task(gateway: GatewayConnection, config: AgentConfig,
     # Semantic endpoint search can rank an unrelated collection first. Retry
     # with an entity-specific query before failing safely.
     entity_is_device = "device" in str(task.get("entity", "")).casefold()
+    entity_is_end_users = str(task.get("entity", "")).casefold() in {"end-users", "users"}
     has_matching_route = any(
         _is_device_item(item) if task.get("identifier") is not None
         else _is_device_collection(item, task.get("operation", "list"))
         for item in candidates
     )
+    if entity_is_end_users and not any(_candidate_path(item).casefold().endswith("/user/end-users") for item in candidates):
+        retry = await gateway.call("discover_endpoints", {
+            "intent": "NinjaOne end users list all end users collection GET endpoint accessibleDeviceIds assignedDeviceIds",
+            "method": "GET", "candidate_limit": max(config.max_candidates, 50),
+        })
+        retry_candidates = retry.get("candidates", []) if isinstance(retry, dict) else []
+        known = {item.get("endpoint") for item in candidates}
+        candidates.extend(item for item in retry_candidates if item.get("endpoint") not in known)
+
     if entity_is_device and not has_matching_route:
         retry = await gateway.call("discover_endpoints", {
             "intent": "NinjaOne devices device inventory list all devices collection GET endpoint",
