@@ -75,3 +75,10 @@ The generic selector uses a conservative name-based read-only filter. For NinjaO
 The generic `--mcp-question` mode now supports a bounded sequence of tool calls (maximum 4 by default): discover an API operation, inspect its schema, execute a GET request, then answer from the returned data. It prevents repeating an identical call in the same request and stops if OLMo selects an unknown tool or invalid action.
 
 The generic mode is still an initial read-only implementation. For NinjaOne, raw requests are blocked and endpoint execution must use a discovered `GET ` endpoint key. Other MCP servers are filtered by conservative read-style tool-name prefixes; do not connect write-capable servers to this mode until their tool permissions are explicitly reviewed.
+
+
+### Generic natural-language content filtering
+
+The generic --mcp-question agent can translate varied wording into reusable structured filters instead of relying on exact phrase matching. For example, 'begins with', 'starts with', and 'prefix' map to starts_with; 'includes', 'has', and 'contains' map to contains; 'exactly' maps to equals; and 'ends in' maps to ends_with.
+
+Filters are applied in Python to returned record collections, with case-insensitive matching and support for dotted/nested fields. Supported operators include equals, not_equals, contains, not_contains, starts_with, ends_with, in, not_in, numeric comparisons, and empty/not-empty checks. The agent records the number of records examined and matched. This keeps content matching deterministic and avoids asking the local model to scan every record itself.
