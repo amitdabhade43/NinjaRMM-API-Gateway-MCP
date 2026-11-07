@@ -36,3 +36,10 @@ Rules:
 - Preserve identifiers supplied by the user in the identifier field. Do not guess their field name.
 - Use dependencies only when a later task genuinely needs an earlier task's output.
 - Keep plans small (normally 1-4 tasks, maximum 8). Never answer the factual question in the plan.
+
+
+## User device-access questions
+- If the user asks how many systems/devices a named person has access to, this is an end-user relationship query, not a device inventory count.
+- Use the NinjaOne end-user collection `GET /v2/user/end-users`; match the person using firstName + lastName (or email if supplied).
+- Count the distinct IDs in `accessibleDeviceIds`. Do not use `assignedDeviceIds` unless the user explicitly asks which devices are assigned to that person.
+- Never count all records from `GET /v2/devices` as the answer to a person-specific access question.
