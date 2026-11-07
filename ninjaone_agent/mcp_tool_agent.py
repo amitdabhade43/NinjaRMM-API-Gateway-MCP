@@ -98,6 +98,8 @@ async def run_mcp_question(
         "delete, raw-request, or action tools. Return JSON only in one of these "
         "forms: {\"action\":\"call\",\"tool\":\"server.tool\","
         "\"arguments\":{}} or {\"action\":\"final\",\"answer\":\"...\"}. "
+        "The action field must be exactly call or final; never put a tool name "
+        "in the action field. Put the selected tool name in the tool field. "
         "Do not repeat a tool call with identical arguments."
     )
     history: list[dict[str, Any]] = []
@@ -111,6 +113,20 @@ async def run_mcp_question(
             f"\n\nChoose the next action. This is step {step + 1} of {max_steps}."
         )
         decision = await llm.complete_json(system, prompt)
+        # Some OLMo responses use the selected tool name as the action
+        # (for example, action="discover_endpoints") instead of action="call".
+        # Normalize that shorthand only when it matches an approved tool.
+        action = decision.get("action")
+        if action not in {"call", "final"}:
+            action_tool = next(
+                (item for item in shortlist
+                 if action in {item.name, item.qualified_name}),
+                None,
+            )
+            if action_tool is not None:
+                decision["tool"] = action_tool.qualified_name
+                decision["action"] = "call"
+
         if decision.get("action") == "final":
             answer = decision.get("answer")
             if isinstance(answer, str) and answer.strip():
