@@ -20,7 +20,9 @@ def _has_path_parameters(candidate: dict[str, Any]) -> bool:
 
 def _is_device_collection(candidate: dict[str, Any], operation: str) -> bool:
     path = _candidate_path(candidate).casefold()
-    allowed = ("/devices-detailed",) if operation == "details" else ("/devices",)
+    # Prefer the richer endpoint for details, but the standard collection is a
+    # valid fallback when /devices-detailed is not exposed by this tenant.
+    allowed = ("/devices-detailed", "/devices") if operation == "details" else ("/devices",)
     return any(path.endswith(suffix) for suffix in allowed)
 
 
