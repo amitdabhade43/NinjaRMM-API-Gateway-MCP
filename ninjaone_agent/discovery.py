@@ -10,7 +10,7 @@ def _candidate_path(candidate: dict[str, Any]) -> str:
     path = candidate.get("path")
     if not path:
         endpoint = str(candidate.get("endpoint", ""))
-        path = re.sub(r"^\\s*GET\\s+", "", endpoint, flags=re.I)
+        path = re.sub(r"^\s*GET\s+", "", endpoint, flags=re.I)
     return str(path).rstrip("/")
 
 
@@ -47,8 +47,8 @@ def choose_candidate(candidates: list[dict[str, Any]], semantic: dict[str, Any],
 
     entity = str(task.get("entity", "")).casefold()
     if "device" in entity:
-        # Never execute an unrelated semantic match (e.g. organization documents)
-        # for a device inventory request.
+        # This is a provider-specific rule. Never execute an unrelated semantic
+        # match (for example organization documents) for a device inventory task.
         exact = [item for item in collection_pool if _is_device_collection(item, task.get("operation", "list"))]
         if exact:
             return exact[0]
@@ -72,8 +72,8 @@ async def discover_for_task(gateway: GatewayConnection, config: AgentConfig,
     candidates = result.get("candidates", []) if isinstance(result, dict) else []
     semantic = result.get("semantic", {}) if isinstance(result, dict) else {}
 
-    # Discovery is semantic and may rank an unrelated collection first. Retry
-    # with a direct entity-oriented query before deciding no safe route exists.
+    # Semantic endpoint search can rank an unrelated collection first. Retry
+    # with an entity-specific query before failing safely.
     if "device" in str(task.get("entity", "")).casefold() and not any(
         _is_device_collection(item, task.get("operation", "list")) for item in candidates
     ):
