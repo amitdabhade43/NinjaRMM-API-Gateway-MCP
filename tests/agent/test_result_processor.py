@@ -1,4 +1,4 @@
-from ninjaone_agent.result_processor import process_result
+import pytest\nfrom ninjaone_agent.result_processor import process_result
 from ninjaone_agent.response import format_fast
 
 def test_count_applies_filter_before_counting():
@@ -55,5 +55,50 @@ def test_incomplete_metadata_is_preserved():
         "endpoint": "GET /v2/devices", "complete": False, "truncated": True,
         "data": [{"id": 1}],
     })
+    assert result["complete"] is False
+    assert result["truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_cursor_pagination_uses_last_device_id():
+    from types import SimpleNamespace
+    from ninjaone_agent.executor import _execute_cursor_pages
+
+    class FakeGateway:
+        def __init__(self):
+            self.calls = []
+        async def call(self, name, args):
+            self.calls.append((name, args))
+            if len(self.calls) == 1:
+                return {"endpoint": "GET /v2/devices", "complete": True,
+                        "data": [{"id": i, "displayName": f"PC-{i}"} for i in range(1, 51)]}
+            return {"endpoint": "GET /v2/devices", "complete": True,
+                    "data": [{"id": 51, "displayName": "2qn-PC-51"}]}
+
+    gateway = FakeGateway()
+    config = SimpleNamespace(page_size=100, max_pages=10)
+    result = await _execute_cursor_pages(
+        gateway, config, "GET /v2/devices", {}, {}, ("after", "pageSize")
+    )
+    assert result["complete"] is True
+    assert result["pages_fetched"] == 2
+    assert result["items_fetched"] == 51
+    assert gateway.calls[0][1]["query"] == {"pageSize": 50}
+    assert gateway.calls[1][1]["query"] == {"pageSize": 50, "after": 50}
+
+@pytest.mark.asyncio
+async def test_cursor_pagination_preserves_gateway_truncation():
+    from types import SimpleNamespace
+    from ninjaone_agent.executor import _execute_cursor_pages
+
+    class FakeGateway:
+        async def call(self, name, args):
+            return {"endpoint": "GET /v2/devices", "complete": False, "truncated": True,
+                    "data": [{"id": 1, "displayName": "2qn-PC-01"}]}
+
+    result = await _execute_cursor_pages(
+        FakeGateway(), SimpleNamespace(page_size=100, max_pages=10),
+        "GET /v2/devices", {}, {}, ("after", "pageSize")
+    )
     assert result["complete"] is False
     assert result["truncated"] is True
