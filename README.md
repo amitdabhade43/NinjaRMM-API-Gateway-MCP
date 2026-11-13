@@ -58,7 +58,7 @@ python -m pip install -e ".[dev]"
 Download the current official OpenAPI specification once (and repeat this after NinjaOne publishes an API schema update):
 
 ```powershell
-.\\.venv\\Scripts\\python.exe .\\scripts\\sync_openapi_spec.py
+.\.venv\Scripts\python.exe .\scripts\sync_openapi_spec.py
 ```
 
 The downloaded `NinjaRMM-API-v2.json` is a local generated file and is intentionally not committed. The gateway will fail fast with a clear error if the file is missing.
