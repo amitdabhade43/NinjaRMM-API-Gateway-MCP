@@ -1,6 +1,6 @@
 # NinjaOne API Gateway MCP
 
-A schema-driven MCP gateway for the NinjaOne REST API v2. It discovers operations from the bundled OpenAPI document and exposes a small, general-purpose tool surface. It does not hardcode a separate tool for every NinjaOne resource.
+A schema-driven MCP gateway for the NinjaOne REST API v2. It discovers operations from a locally downloaded copy of NinjaOne's official OpenAPI document and exposes a small, general-purpose tool surface. It does not hardcode a separate tool for every NinjaOne resource.
 
 ## Security model
 
@@ -54,6 +54,14 @@ py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
 ```
+
+Download the current official OpenAPI specification once (and repeat this after NinjaOne publishes an API schema update):
+
+```powershell
+.\\.venv\\Scripts\\python.exe .\\scripts\\sync_openapi_spec.py
+```
+
+The downloaded `NinjaRMM-API-v2.json` is a local generated file and is intentionally not committed. The gateway will fail fast with a clear error if the file is missing.
 
 Configure environment variables (PowerShell):
 
