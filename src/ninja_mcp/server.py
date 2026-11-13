@@ -41,7 +41,7 @@ def _spec_path() -> Path:
     if not path.is_file():
         raise FileNotFoundError(
             f"NinjaOne OpenAPI specification was not found at {path}. "
-            "Run .\.venv\Scripts\python.exe .\scripts\sync_openapi_spec.py "
+            r"Run .\.venv\Scripts\python.exe .\scripts\sync_openapi_spec.py "
             "from the gateway repository root, or set NINJA_MCP_SPEC to the downloaded JSON file."
         )
     return path
