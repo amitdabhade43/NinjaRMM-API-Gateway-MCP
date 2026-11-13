@@ -1,0 +1,28 @@
+{
+  "openapi": "3.1.0",
+  "info": {"title": "NinjaOne API test fixture", "version": "test"},
+  "paths": {
+    "/v2/devices": {
+      "get": {
+        "operationId": "getDevices",
+        "summary": "List devices",
+        "tags": ["devices"],
+        "responses": {"200": {"description": "OK"}}
+      },
+      "post": {
+        "operationId": "createDevice",
+        "summary": "Create device",
+        "tags": ["devices"],
+        "responses": {"201": {"description": "Created"}}
+      }
+    },
+    "/v2/device/{id}/reboot/{mode}": {
+      "post": {
+        "operationId": "rebootDevice",
+        "summary": "Reboot device",
+        "tags": ["management"],
+        "responses": {"200": {"description": "OK"}}
+      }
+    }
+  }
+}
