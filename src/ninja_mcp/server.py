@@ -33,8 +33,18 @@ mcp=FastMCP("NinjaOne-API-Gateway")
 _SPEC: Spec|None=None
 _CLIENT: NinjaClient|None=None
 
-def _spec_path()->Path:
-    return Path(os.getenv("NINJA_MCP_SPEC")) if os.getenv("NINJA_MCP_SPEC") else Path(__file__).resolve().parent.parent.parent/"NinjaRMM-API-v2.json"
+def _spec_path() -> Path:
+    configured = os.getenv("NINJA_MCP_SPEC")
+    path = Path(configured) if configured else (
+        Path(__file__).resolve().parent.parent.parent / "NinjaRMM-API-v2.json"
+    )
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"NinjaOne OpenAPI specification was not found at {path}. "
+            r"Run .\.venv\Scripts\python.exe .\scripts\sync_openapi_spec.py "
+            "from the gateway repository root, or set NINJA_MCP_SPEC to the downloaded JSON file."
+        )
+    return path
 
 def _spec()->Spec:
     global _SPEC
