@@ -1,7 +1,7 @@
 """Download and validate NinjaOne's official Public API v2 OpenAPI document.
 
 Run from the repository root:
-    .\\.venv\\Scripts\\python.exe .\\scripts\\sync_openapi_spec.py
+    .\.venv\Scripts\python.exe .\scripts\sync_openapi_spec.py
 """
 from __future__ import annotations
 
