@@ -1,6 +1,8 @@
 """Async NinjaOne OAuth2 client with safe, bounded retries."""
 from __future__ import annotations
 import asyncio, logging, time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 import httpx
 
@@ -8,7 +10,46 @@ log=logging.getLogger(__name__)
 TOKEN_REFRESH_MARGIN_S=60
 DEFAULT_TIMEOUT_S=30.0
 MAX_RETRIES=3
+MAX_RETRY_DELAY_S=30.0
 RETRYABLE_STATUS={429,500,502,503,504}
+
+
+def _retry_delay(headers: Any, attempt: int, now: float | None = None) -> float:
+    """Read standard retry/rate-limit headers, with a bounded exponential fallback."""
+    values = {str(key).casefold(): str(value).strip()
+              for key, value in (headers.items() if hasattr(headers, "items") else [])}
+    current = time.time() if now is None else now
+
+    retry_after = values.get("retry-after")
+    if retry_after:
+        try:
+            delay = float(retry_after)
+        except ValueError:
+            try:
+                retry_at = parsedate_to_datetime(retry_after)
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=timezone.utc)
+                delay = retry_at.timestamp() - current
+            except (TypeError, ValueError, OverflowError):
+                delay = 2 ** attempt
+    else:
+        delay = None
+        # RateLimit-Reset is a relative delay; X-RateLimit-Reset is commonly
+        # an epoch timestamp. Treat very large values as epoch seconds too.
+        for header in ("ratelimit-reset", "x-ratelimit-reset"):
+            raw = values.get(header)
+            if not raw:
+                continue
+            try:
+                parsed = float(raw)
+            except ValueError:
+                continue
+            delay = parsed - current if header == "x-ratelimit-reset" or parsed > 1_000_000_000 else parsed
+            break
+        if delay is None:
+            delay = 2 ** attempt
+
+    return max(0.0, min(float(delay), MAX_RETRY_DELAY_S))
 
 class NinjaAuthError(Exception):pass
 class NinjaAPIError(Exception):
@@ -66,11 +107,11 @@ class NinjaClient:
             if response.status_code==401 and attempt==0:
                 await self._ensure_token(force=True);continue
             if response.status_code not in RETRYABLE_STATUS or method!="GET" or attempt+1>=attempts:break
-            retry_after=response.headers.get("Retry-After")
-            try:delay=float(retry_after) if retry_after else 2**attempt
-            except ValueError:delay=2**attempt
-            delay=max(0.0,min(delay,15.0))
-            log.warning("GET rate/availability response %s; retrying in %.1fs",response.status_code,delay)
+            delay = _retry_delay(response.headers, attempt)
+            log.warning(
+                "GET %s returned HTTP %s; bounded retry %d/%d in %.1fs",
+                path, response.status_code, attempt + 1, attempts - 1, delay,
+            )
             await asyncio.sleep(delay)
         if last_response is None:raise NinjaAPIError("NinjaOne request failed without an HTTP response.")
         if last_response.status_code>=400:
