@@ -34,3 +34,6 @@ fast_memory.json
 # OS files
 .DS_Store
 Thumbs.db
+
+# Downloaded from NinjaOne's official OpenAPI endpoint; refresh with scripts/sync_openapi_spec.py
+NinjaRMM-API-v2.json
