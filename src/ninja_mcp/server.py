@@ -33,6 +33,17 @@ mcp=FastMCP("NinjaOne-API-Gateway")
 _SPEC: Spec|None=None
 _CLIENT: NinjaClient|None=None
 
+_SIMPLE_READ_VERB_RE=re.compile(r"\\b(?:how many|count|total|list|show|display|get|fetch|what are|which are)\\b",re.I)
+_COMPLEX_INTENT_RE=re.compile(r"\\b(?:with|where|whose|per|each|by|assigned|accessible|offline|online|named|called|starting|beginning|before|after|since|between|compare|versus|vs|and)\\b",re.I)
+
+
+def _is_simple_read_intent(intent:str)->bool:
+    """Recognize plain single-purpose reads that do not need semantic reranking."""
+    text=re.sub(r"\\s+"," ",(intent or "").strip())
+    return bool(text and _SIMPLE_READ_VERB_RE.search(text)
+                and not _COMPLEX_INTENT_RE.search(text))
+
+
 def _spec_path()->Path:
     return Path(os.getenv("NINJA_MCP_SPEC")) if os.getenv("NINJA_MCP_SPEC") else Path(__file__).resolve().parent.parent.parent/"NinjaRMM-API-v2.json"
 
@@ -196,15 +207,21 @@ async def discover_endpoints(intent:str,category:str|None=None,method:str|None=N
     if not intent.strip() and not category:
         return {"categories":spec.categories,"supported_methods":sorted(ALLOWED_METHODS),
                 "total_supported_endpoints":len(spec.endpoints)}
-    candidates=search(spec,intent,category=category,method=method,limit=candidate_limit)
+    simple_read = method is None and _is_simple_read_intent(intent)
+    search_method = "GET" if simple_read else method
+    candidates=search(spec,intent,category=category,method=search_method,limit=candidate_limit)
     if not candidates:
         return {"count":0,"results":[],"reason":"No matching supported OpenAPI operation was found."}
-    try:
-        ranked=await semantic_rank(intent,[e for e in candidates])
-    except Exception as exc:
-        log.warning("Local semantic ranking unavailable: %s",exc)
-        ranked={"mode":"fuzzy_fallback","selected":[e.key for e in candidates[:5]],
-                "warning":f"Semantic ranking unavailable: {type(exc).__name__}"}
+    if simple_read:
+        ranked={"mode":"fuzzy_fast_path","selected":[{"endpoint":candidates[0].key}],
+                "reason":"Simple read intent; semantic reranking was skipped."}
+    else:
+        try:
+            ranked=await semantic_rank(intent,[e for e in candidates])
+        except Exception as exc:
+            log.warning("Local semantic ranking unavailable: %s",exc)
+            ranked={"mode":"fuzzy_fallback","selected":[e.key for e in candidates[:5]],
+                    "warning":f"Semantic ranking unavailable: {type(exc).__name__}"}
     return {"candidate_count":len(candidates),"semantic":ranked,
             "elapsed_ms":round((asyncio.get_running_loop().time()-discovery_started)*1000,1),
             "candidates":[e.to_summary() for e in candidates]}
