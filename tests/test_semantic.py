@@ -47,6 +47,27 @@ async def test_semantic_rank_reuses_cached_selection(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_semantic_failure_is_cached_briefly(monkeypatch):
+    monkeypatch.setenv("NINJA_MCP_LLM_BASE_URL", "http://127.0.0.1:50000/v1")
+    monkeypatch.setenv("NINJA_MCP_LLM_MODEL", "local-model")
+    monkeypatch.setenv("NINJA_MCP_SEMANTIC_FAILURE_CACHE_TTL", "8")
+    semantic._CACHE.clear()
+    endpoint = ep("GET", "/v2/devices", "List devices", "Devices")
+    uncached = AsyncMock(side_effect=TimeoutError("local model timed out"))
+    monkeypatch.setattr(semantic, "_semantic_rank_uncached", uncached)
+
+    first = await semantic.semantic_rank("list devices", [endpoint])
+    second = await semantic.semantic_rank("list devices", [endpoint])
+
+    assert first["mode"] == "fuzzy_fallback"
+    assert first["cache_hit"] is False
+    assert second["mode"] == "fuzzy_fallback"
+    assert second["cache_hit"] is True
+    assert second["elapsed_ms"] == 0.0
+    assert uncached.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_semantic_rank_cache_key_includes_intent(monkeypatch):
     monkeypatch.setenv("NINJA_MCP_LLM_BASE_URL", "http://127.0.0.1:50000/v1")
     monkeypatch.setenv("NINJA_MCP_LLM_MODEL", "local-model")
