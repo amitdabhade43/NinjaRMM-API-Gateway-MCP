@@ -38,8 +38,11 @@ async def test_semantic_rank_reuses_cached_selection(monkeypatch):
     first = await semantic.semantic_rank("list devices", [endpoint])
     second = await semantic.semantic_rank("list devices", [endpoint])
 
-    assert first == expected
-    assert second == expected
+    assert first["selected"] == expected["selected"]
+    assert first["cache_hit"] is False
+    assert second["selected"] == expected["selected"]
+    assert second["cache_hit"] is True
+    assert second["elapsed_ms"] == 0.0
     assert uncached.await_count == 1
 
 
