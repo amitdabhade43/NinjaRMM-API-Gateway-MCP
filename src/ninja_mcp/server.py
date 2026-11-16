@@ -280,6 +280,7 @@ async def execute_paginated_endpoint(endpoint:str,path_params:dict[str,Any]|None
     Supply the page and page-size parameter names and optional dotted result_path (e.g. 'results').
     Stops on a short page or max_pages; no undocumented pagination convention is guessed.
     """
+    pagination_started=asyncio.get_running_loop().time()
     found=_spec().get(endpoint)
     if found is None:return {"error":f"Unknown endpoint {endpoint!r}","complete":False}
     if found.method!="GET":return {"error":"Automatic pagination is GET-only.","complete":False}
@@ -329,6 +330,7 @@ async def execute_paginated_endpoint(endpoint:str,path_params:dict[str,Any]|None
                 "pages_fetched":pages,"items_fetched":len(items),"complete":False}
     data,truncated=truncate(items)
     return {"endpoint":endpoint,"pages_fetched":pages,"items_fetched":len(items),
+            "elapsed_ms":round((asyncio.get_running_loop().time()-pagination_started)*1000,1),
             "complete":finished and not truncated,"truncated":truncated,
             "max_pages_reached":not finished,"data":data,
             "note":"If complete=false, increase max_pages or narrow the query."}
