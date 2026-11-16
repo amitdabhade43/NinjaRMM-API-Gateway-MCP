@@ -15,7 +15,7 @@ from mcp.server.fastmcp import FastMCP
 from jsonschema import Draft202012Validator, ValidationError
 from .approval import ApprovalError, verify_approval
 from .client import NinjaAPIError, NinjaAuthError, NinjaClient
-from .search import search
+from .search import score_endpoint, search
 from .semantic import close_semantic_clients, semantic_rank
 from .spec import Endpoint, Spec
 from .truncate import truncate
@@ -211,9 +211,11 @@ async def discover_endpoints(intent:str,category:str|None=None,method:str|None=N
     candidates=search(spec,intent,category=category,method=search_method,limit=candidate_limit)
     if not candidates:
         return {"count":0,"results":[],"reason":"No matching supported OpenAPI operation was found."}
-    if simple_read:
+    scores=[score_endpoint(intent,endpoint) for endpoint in candidates[:2]]
+    ambiguous_simple_read = simple_read and len(scores)>1 and (scores[0]-scores[1])<8
+    if simple_read and not ambiguous_simple_read:
         ranked={"mode":"fuzzy_fast_path","selected":[{"endpoint":candidates[0].key}],
-                "reason":"Simple read intent; semantic reranking was skipped."}
+                "reason":"Simple read intent with a clear top OpenAPI match; semantic reranking was skipped."}
     else:
         try:
             ranked=await semantic_rank(intent,[e for e in candidates])
