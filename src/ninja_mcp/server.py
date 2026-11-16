@@ -16,7 +16,7 @@ from jsonschema import Draft202012Validator, ValidationError
 from .approval import ApprovalError, verify_approval
 from .client import NinjaAPIError, NinjaAuthError, NinjaClient
 from .search import search
-from .semantic import semantic_rank
+from .semantic import close_semantic_clients, semantic_rank
 from .spec import Endpoint, Spec
 from .truncate import truncate
 
@@ -165,14 +165,16 @@ async def _execute(endpoint_key:str,*,path_params:dict[str,Any]|None=None,
             verify_approval(approval_token,method,path,body)
     except (ValueError,ApprovalError) as exc:
         return {"error":str(exc),"executed":False}
+    request_started=asyncio.get_running_loop().time()
     try:
         data=await _client().request(method,path,params=query,json_body=body)
     except NinjaAuthError as exc:
         return {"error":f"Authentication failed: {exc}","executed":False}
     except NinjaAPIError as exc:
         return {"error":str(exc),"status":exc.status,"body":exc.body,"executed":True}
+    elapsed_ms=round((asyncio.get_running_loop().time()-request_started)*1000,1)
     result,was_truncated=truncate(data)
-    return {"endpoint":f"{method} {path}","executed":True,"complete":not was_truncated,
+    return {"endpoint":f"{method} {path}","executed":True,"elapsed_ms":elapsed_ms,"complete":not was_truncated,
             "truncated":was_truncated,"pagination":{"automatic":False,
             "note":"If complete=false, use the endpoint's documented page/pageSize/cursor parameters to retrieve remaining results."}
             if was_truncated else {"automatic":False,"note":"No automatic pagination was applied."},
@@ -186,6 +188,7 @@ async def discover_endpoints(intent:str,category:str|None=None,method:str|None=N
     Supply a natural-language intent such as 'find a user by email and list assigned devices'.
     Semantic selection is grounded only in the OpenAPI candidates returned by fuzzy retrieval.
     """
+    discovery_started=asyncio.get_running_loop().time()
     if method:
         try: method=_check_method(method)
         except ValueError as exc: return {"error":str(exc)}
@@ -203,6 +206,7 @@ async def discover_endpoints(intent:str,category:str|None=None,method:str|None=N
         ranked={"mode":"fuzzy_fallback","selected":[e.key for e in candidates[:5]],
                 "warning":f"Semantic ranking unavailable: {type(exc).__name__}"}
     return {"candidate_count":len(candidates),"semantic":ranked,
+            "elapsed_ms":round((asyncio.get_running_loop().time()-discovery_started)*1000,1),
             "candidates":[e.to_summary() for e in candidates]}
 
 @mcp.tool()
@@ -318,6 +322,7 @@ async def _shutdown()->None:
     if _CLIENT is not None:
         await _CLIENT.aclose()
         _CLIENT=None
+    await close_semantic_clients()
 
 def main()->None:
     log.info("Starting NinjaOne API Gateway MCP; spec=%s",_spec_path())
