@@ -38,6 +38,7 @@ async def test_scoped_inventory_request_keeps_semantic_reranking():
 
 def test_filtered_or_scoped_prompts_are_not_simple_reads():
     assert server._is_simple_read_intent("How many devices?")
+    assert server._is_simple_read_intent("How many devices in total?")
     assert not server._is_simple_read_intent("Count devices with names starting with VM")
     assert not server._is_simple_read_intent("List devices assigned to Rene")
     assert not server._is_simple_read_intent("Show devices in the HOERBIGER organization")
