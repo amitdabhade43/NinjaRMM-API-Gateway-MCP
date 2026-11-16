@@ -34,7 +34,7 @@ _SPEC: Spec|None=None
 _CLIENT: NinjaClient|None=None
 
 _SIMPLE_READ_VERB_RE=re.compile(r"\b(?:how many|count|total|list|show|display|get|fetch|what are|which are)\b",re.I)
-_COMPLEX_INTENT_RE=re.compile(r"\b(?:with|where|whose|per|each|by|assigned|accessible|offline|online|named|called|starting|beginning|before|after|since|between|compare|versus|vs|and)\b",re.I)
+_COMPLEX_INTENT_RE=re.compile(r"\b(?:with|where|whose|per|each|by|assigned|accessible|access|offline|online|named|called|starting|beginning|before|after|since|between|compare|versus|vs|and|in|under|inside|belong\w*|owned|owner|status|details?)\b",re.I)
 
 
 def _is_simple_read_intent(intent:str)->bool:
