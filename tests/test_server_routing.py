@@ -23,6 +23,23 @@ async def test_simple_inventory_read_skips_semantic_reranking():
 
 
 @pytest.mark.asyncio
+async def test_ambiguous_simple_read_keeps_semantic_reranking():
+    first = Endpoint("GET", "/v2/users", "getUsers", "List users", "",
+                     "Users", ["Users"])
+    second = Endpoint("GET", "/v2/user/end-users", "getEndUsers", "List end users", "",
+                      "Users", ["Users"])
+    ranked = {"mode": "local_semantic", "selected": [{"endpoint": first.key}]}
+    with patch.object(server, "_spec", return_value=object()):
+        with patch.object(server, "search", return_value=[first, second]):
+            with patch.object(server, "score_endpoint", side_effect=[60, 58]):
+                with patch.object(server, "semantic_rank", new=AsyncMock(return_value=ranked)) as semantic:
+                    result = await server.discover_endpoints("How many users?")
+
+    assert result["semantic"] == ranked
+    semantic.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_scoped_inventory_request_keeps_semantic_reranking():
     endpoint = Endpoint("GET", "/v2/user/end-users/{id}/devices", "getUserDevices",
                         "List devices accessible by user", "", "Users", ["Users"])
