@@ -20,6 +20,13 @@ def _cache_ttl() -> float:
         return 60.0
 
 
+def _failure_cache_ttl() -> float:
+    try:
+        return max(0.0, float(os.getenv("NINJA_MCP_SEMANTIC_FAILURE_CACHE_TTL", "8")))
+    except ValueError:
+        return 8.0
+
+
 def _http_client(base_url: str, timeout: float) -> httpx.AsyncClient:
     key = (base_url, timeout)
     client = _CLIENTS.get(key)
@@ -95,16 +102,24 @@ async def semantic_rank(intent: str, candidates: list[Endpoint]) -> dict[str, An
     now = time.monotonic()
     ttl = _cache_ttl()
     cached = _CACHE.get(cache_key)
-    if cached and ttl > 0 and now - cached[0] < ttl:
-        cached_result = copy.deepcopy(cached[1])
-        cached_result["cache_hit"] = True
-        cached_result["elapsed_ms"] = 0.0
-        return cached_result
+    if cached:
+        cached_ttl = ttl if cached[1].get("mode") == "local_semantic" else _failure_cache_ttl()
+        if cached_ttl > 0 and now - cached[0] < cached_ttl:
+            cached_result = copy.deepcopy(cached[1])
+            cached_result["cache_hit"] = True
+            cached_result["elapsed_ms"] = 0.0
+            return cached_result
 
-    result = await _semantic_rank_uncached(intent, candidates)
-    if result.get("mode") == "local_semantic":
-        result["cache_hit"] = False
-    if result.get("mode") == "local_semantic" and ttl > 0:
+    started = time.perf_counter()
+    try:
+        result = await _semantic_rank_uncached(intent, candidates)
+    except Exception as exc:
+        result = {"mode": "fuzzy_fallback", "selected": [endpoint.key for endpoint in candidates[:5]],
+                  "warning": f"Local semantic ranking unavailable: {type(exc).__name__}",
+                  "elapsed_ms": round((time.perf_counter() - started) * 1000, 1)}
+    result["cache_hit"] = False
+    cache_ttl = ttl if result.get("mode") == "local_semantic" else _failure_cache_ttl()
+    if cache_ttl > 0:
         if len(_CACHE) >= 256:
             oldest = min(_CACHE, key=lambda key: _CACHE[key][0])
             _CACHE.pop(oldest, None)
