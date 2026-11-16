@@ -72,7 +72,7 @@ For MCP clients using stdio, launch `python -m ninja_mcp` with the same environm
 
 ## Semantic ranking performance
 
-When local semantic ranking is enabled, plain single-purpose read intents are routed through fuzzy OpenAPI ranking without an additional semantic-model call. Scoped, filtered and multi-step requests retain semantic ranking. Identical semantic intent/candidate combinations are cached in memory for 60 seconds by default. The gateway also reuses an HTTP keep-alive client for its configured local model endpoint. Set `NINJA_MCP_SEMANTIC_CACHE_TTL=0` to disable result caching, or choose another number of seconds. Cache keys include the model endpoint, model ID, normalized intent and candidate endpoint keys; no prompt or credential is written to disk.
+When local semantic ranking is enabled, plain single-purpose read intents are routed through fuzzy OpenAPI ranking without an additional semantic-model call. Scoped, filtered and multi-step requests retain semantic ranking. Identical semantic intent/candidate combinations are cached in memory for 60 seconds by default. The gateway also reuses an HTTP keep-alive client for its configured local model endpoint. Set `NINJA_MCP_SEMANTIC_CACHE_TTL=0` to disable successful-result caching, or choose another number of seconds. Failed semantic calls fall back to fuzzy results and are cached for 8 seconds by default; override this with `NINJA_MCP_SEMANTIC_FAILURE_CACHE_TTL`. Cache keys include the model endpoint, model ID, normalized intent and candidate endpoint keys; no prompt or credential is written to disk.
 
 Discovery responses include elapsed-time metadata. Endpoint execution responses include the NinjaOne API request duration so clients can distinguish semantic-ranking time from API time.
 
