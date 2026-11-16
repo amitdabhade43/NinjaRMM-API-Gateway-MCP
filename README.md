@@ -70,6 +70,12 @@ python -m ninja_mcp
 
 For MCP clients using stdio, launch `python -m ninja_mcp` with the same environment. Do not commit credentials or approval secrets.
 
+## Semantic ranking performance
+
+When local semantic ranking is enabled, identical intent/candidate combinations are cached in memory for 60 seconds by default. The gateway also reuses an HTTP keep-alive client for its configured local model endpoint. Set `NINJA_MCP_SEMANTIC_CACHE_TTL=0` to disable result caching, or choose another number of seconds. Cache keys include the model endpoint, model ID, normalized intent and candidate endpoint keys; no prompt or credential is written to disk.
+
+Discovery responses include elapsed-time metadata. Endpoint execution responses include the NinjaOne API request duration so clients can distinguish semantic-ranking time from API time.
+
 ## Correctness and pagination
 
 - OpenAPI local `$ref` values are resolved, including nested schemas and parameter references. Circular/unresolved references are surfaced rather than silently treated as valid schemas.
