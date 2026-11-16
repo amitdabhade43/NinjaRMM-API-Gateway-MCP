@@ -1,12 +1,43 @@
 """Optional local-LLM semantic endpoint ranking with strict candidate grounding."""
 from __future__ import annotations
+import copy
+import hashlib
 import json
 import os
+import time
 from typing import Any
 import httpx
 from .spec import Endpoint
 
-async def semantic_rank(intent: str, candidates: list[Endpoint]) -> dict[str, Any]:
+_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_CLIENTS: dict[tuple[str, float], httpx.AsyncClient] = {}
+
+
+def _cache_ttl() -> float:
+    try:
+        return max(0.0, float(os.getenv("NINJA_MCP_SEMANTIC_CACHE_TTL", "60")))
+    except ValueError:
+        return 60.0
+
+
+def _http_client(base_url: str, timeout: float) -> httpx.AsyncClient:
+    key = (base_url, timeout)
+    client = _CLIENTS.get(key)
+    if client is None or client.is_closed:
+        client = httpx.AsyncClient(timeout=timeout)
+        _CLIENTS[key] = client
+    return client
+
+
+async def close_semantic_clients() -> None:
+    clients = list(_CLIENTS.values())
+    _CLIENTS.clear()
+    for client in clients:
+        if not client.is_closed:
+            await client.aclose()
+
+
+async def _semantic_rank_uncached(intent: str, candidates: list[Endpoint]) -> dict[str, Any]:
     base_url = os.getenv("NINJA_MCP_LLM_BASE_URL", "").rstrip("/")
     model = os.getenv("NINJA_MCP_LLM_MODEL", "")
     if not base_url or not model:
@@ -27,14 +58,15 @@ async def semantic_rank(intent: str, candidates: list[Endpoint]) -> dict[str, An
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     timeout = float(os.getenv("NINJA_MCP_LLM_TIMEOUT", "20"))
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(f"{base_url}/chat/completions", headers=headers,
-                                     json={"model": model, "temperature": 0,
-                                           "response_format": {"type": "json_object"},
-                                           "messages": [{"role": "system", "content": "You are a strict API endpoint selector."},
-                                                        {"role": "user", "content": prompt}]})
-        response.raise_for_status()
-        content = response.json()["choices"][0]["message"]["content"]
+    started = time.perf_counter()
+    client = _http_client(base_url, timeout)
+    response = await client.post(f"{base_url}/chat/completions", headers=headers,
+                                 json={"model": model, "temperature": 0,
+                                       "response_format": {"type": "json_object"},
+                                       "messages": [{"role": "system", "content": "You are a strict API endpoint selector."},
+                                                    {"role": "user", "content": prompt}]})
+    response.raise_for_status()
+    content = response.json()["choices"][0]["message"]["content"]
     parsed = json.loads(content)
     selected = []
     for item in parsed.get("selected", []):
@@ -44,4 +76,32 @@ async def semantic_rank(intent: str, candidates: list[Endpoint]) -> dict[str, An
     return {"mode": "local_semantic", "selected": selected,
             "clarification_needed": bool(parsed.get("clarification_needed", False)),
             "reason": str(parsed.get("reason", ""))[:1000],
-            "rejected_unmatched_candidates": max(0, len(parsed.get("selected", [])) - len(selected))}
+            "rejected_unmatched_candidates": max(0, len(parsed.get("selected", [])) - len(selected)),
+            "elapsed_ms": round((time.perf_counter() - started) * 1000, 1)}
+
+
+async def semantic_rank(intent: str, candidates: list[Endpoint]) -> dict[str, Any]:
+    """Cache exact semantic selections and reuse HTTP keep-alive connections."""
+    base_url = os.getenv("NINJA_MCP_LLM_BASE_URL", "").rstrip("/")
+    model = os.getenv("NINJA_MCP_LLM_MODEL", "")
+    if not base_url or not model:
+        return await _semantic_rank_uncached(intent, candidates)
+
+    material = json.dumps(
+        [base_url, model, intent.strip().casefold(), [endpoint.key for endpoint in candidates]],
+        ensure_ascii=False, separators=(",", ":"),
+    )
+    cache_key = hashlib.sha256(material.encode("utf-8")).hexdigest()
+    now = time.monotonic()
+    ttl = _cache_ttl()
+    cached = _CACHE.get(cache_key)
+    if cached and ttl > 0 and now - cached[0] < ttl:
+        return copy.deepcopy(cached[1])
+
+    result = await _semantic_rank_uncached(intent, candidates)
+    if result.get("mode") == "local_semantic" and ttl > 0:
+        if len(_CACHE) >= 256:
+            oldest = min(_CACHE, key=lambda key: _CACHE[key][0])
+            _CACHE.pop(oldest, None)
+        _CACHE[cache_key] = (time.monotonic(), copy.deepcopy(result))
+    return result
