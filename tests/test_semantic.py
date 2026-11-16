@@ -1,3 +1,8 @@
+from unittest.mock import AsyncMock
+
+import pytest
+
+from ninja_mcp import semantic
 from ninja_mcp.search import search
 from ninja_mcp.spec import Endpoint, Spec
 
@@ -17,3 +22,40 @@ def test_delete_is_not_part_of_discovery_index():
     # Spec loader filters DELETE; search only ranks the already-filtered index.
     spec=Spec([ep("GET","/v2/users","Get users")])
     assert all(item.method!="DELETE" for item in search(spec,"users",limit=10))
+
+
+@pytest.mark.asyncio
+async def test_semantic_rank_reuses_cached_selection(monkeypatch):
+    monkeypatch.setenv("NINJA_MCP_LLM_BASE_URL", "http://127.0.0.1:50000/v1")
+    monkeypatch.setenv("NINJA_MCP_LLM_MODEL", "local-model")
+    monkeypatch.setenv("NINJA_MCP_SEMANTIC_CACHE_TTL", "60")
+    semantic._CACHE.clear()
+    endpoint = ep("GET", "/v2/devices", "List devices", "Devices")
+    expected = {"mode": "local_semantic", "selected": [{"endpoint": "GET /v2/devices"}]}
+    uncached = AsyncMock(return_value=expected)
+    monkeypatch.setattr(semantic, "_semantic_rank_uncached", uncached)
+
+    first = await semantic.semantic_rank("list devices", [endpoint])
+    second = await semantic.semantic_rank("list devices", [endpoint])
+
+    assert first == expected
+    assert second == expected
+    assert uncached.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_semantic_rank_cache_key_includes_intent(monkeypatch):
+    monkeypatch.setenv("NINJA_MCP_LLM_BASE_URL", "http://127.0.0.1:50000/v1")
+    monkeypatch.setenv("NINJA_MCP_LLM_MODEL", "local-model")
+    semantic._CACHE.clear()
+    endpoint = ep("GET", "/v2/devices", "List devices", "Devices")
+    uncached = AsyncMock(side_effect=[
+        {"mode": "local_semantic", "selected": [{"endpoint": "GET /v2/devices"}]},
+        {"mode": "local_semantic", "selected": [{"endpoint": "GET /v2/devices"}]},
+    ])
+    monkeypatch.setattr(semantic, "_semantic_rank_uncached", uncached)
+
+    await semantic.semantic_rank("list devices", [endpoint])
+    await semantic.semantic_rank("find devices", [endpoint])
+
+    assert uncached.await_count == 2
