@@ -33,16 +33,15 @@ mcp=FastMCP("NinjaOne-API-Gateway")
 _SPEC: Spec|None=None
 _CLIENT: NinjaClient|None=None
 
-_SIMPLE_READ_VERB_RE=re.compile(r"\\b(?:how many|count|total|list|show|display|get|fetch|what are|which are)\\b",re.I)
-_COMPLEX_INTENT_RE=re.compile(r"\\b(?:with|where|whose|per|each|by|assigned|accessible|offline|online|named|called|starting|beginning|before|after|since|between|compare|versus|vs|and)\\b",re.I)
+_SIMPLE_READ_VERB_RE=re.compile(r"\b(?:how many|count|total|list|show|display|get|fetch|what are|which are)\b",re.I)
+_COMPLEX_INTENT_RE=re.compile(r"\b(?:with|where|whose|per|each|by|assigned|accessible|offline|online|named|called|starting|beginning|before|after|since|between|compare|versus|vs|and)\b",re.I)
 
 
 def _is_simple_read_intent(intent:str)->bool:
     """Recognize plain single-purpose reads that do not need semantic reranking."""
-    text=re.sub(r"\\s+"," ",(intent or "").strip())
+    text=re.sub(r"\s+"," ",(intent or "").strip())
     return bool(text and _SIMPLE_READ_VERB_RE.search(text)
                 and not _COMPLEX_INTENT_RE.search(text))
-
 
 def _spec_path()->Path:
     return Path(os.getenv("NINJA_MCP_SPEC")) if os.getenv("NINJA_MCP_SPEC") else Path(__file__).resolve().parent.parent.parent/"NinjaRMM-API-v2.json"
