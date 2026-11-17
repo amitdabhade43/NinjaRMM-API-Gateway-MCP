@@ -286,11 +286,12 @@ async def execute_raw_request(request:str,body:Any=None,approval_token:str|None=
 async def execute_paginated_endpoint(endpoint:str,path_params:dict[str,Any]|None=None,query:dict[str,Any]|None=None,
                                      page_parameter:str="page",page_size_parameter:str="pageSize",
                                      page_size:int=100,start_page:int=1,max_pages:int=10,
-                                     result_path:str|None=None)->dict[str,Any]:
-    """Fetch multiple GET pages using explicitly selected OpenAPI-declared page parameters.
+                                     result_path:str|None=None,cursor_parameter:str|None=None,
+                                     cursor_field:str|None=None)->dict[str,Any]:
+    """Fetch GET pages using only pagination parameters and cursor fields declared by OpenAPI.
 
-    Supply the page and page-size parameter names and optional dotted result_path (e.g. 'results').
-    Stops on a short page or max_pages; no undocumented pagination convention is guessed.
+    Use page_parameter for numbered pages, or cursor_parameter + cursor_field for
+    documented last-record cursors such as NinjaOne's after=lastNodeId.
     """
     pagination_started=asyncio.get_running_loop().time()
     found=_spec().get(endpoint)
@@ -298,23 +299,53 @@ async def execute_paginated_endpoint(endpoint:str,path_params:dict[str,Any]|None
     if found.method!="GET":return {"error":"Automatic pagination is GET-only.","complete":False}
     try:resolved_path=_interpolate_path(found.path,path_params)
     except ValueError as exc:return {"error":str(exc),"complete":False}
-    if not (1<=page_size<=200 and 1<=max_pages<=20 and start_page>=0):
-        return {"error":"page_size must be 1-200, max_pages 1-20, and start_page non-negative.","complete":False}
-    declared={p.get("name") for p in found.parameters if isinstance(p,dict) and p.get("in")=="query"}
-    if page_parameter not in declared or page_size_parameter not in declared:
-        return {"error":"Pagination parameters are not both declared by this endpoint. Inspect its OpenAPI schema.","complete":False}
-    if page_parameter==page_size_parameter:return {"error":"Page and page-size parameters must differ.","complete":False}
+    if not (1<=page_size<=200 and 1<=max_pages<=50 and start_page>=0):
+        return {"error":"page_size must be 1-200, max_pages 1-50, and start_page non-negative.","complete":False}
+    declared={p.get("name"):p for p in found.parameters if isinstance(p,dict) and p.get("in")=="query"}
+    if page_size_parameter not in declared:
+        return {"error":"The page-size parameter is not declared by this endpoint.","complete":False}
+    cursor_mode=bool(cursor_parameter)
+    if cursor_mode:
+        if not cursor_field or cursor_parameter not in declared:
+            return {"error":"Cursor parameter and cursor field must both be declared by the endpoint schema.","complete":False}
+        cursor_schema=(declared[cursor_parameter].get("schema") or {}).get("type")
+        item_schema=None
+        for response in (found.responses or {}).values():
+            for media in (response.get("content") or {}).values() if isinstance(response,dict) else []:
+                schema=media.get("schema") if isinstance(media,dict) else None
+                if isinstance(schema,dict) and schema.get("type")=="array" and isinstance(schema.get("items"),dict):
+                    item_schema=schema["items"]
+                    break
+            if item_schema:break
+        field_schema=((item_schema or {}).get("properties") or {}).get(cursor_field)
+        field_type=field_schema.get("type") if isinstance(field_schema,dict) else None
+        if not field_type or (cursor_schema and cursor_schema!=field_type):
+            return {"error":"The cursor field is not present in the OpenAPI response schema or its type does not match the cursor parameter.","complete":False}
+    else:
+        if page_parameter not in declared:
+            return {"error":"The page parameter is not declared by this endpoint. Inspect its OpenAPI schema.","complete":False}
+        if page_parameter==page_size_parameter:
+            return {"error":"Page and page-size parameters must differ.","complete":False}
     base_query=dict(query or {})
+    reserved={page_size_parameter}
+    if cursor_mode:reserved.add(cursor_parameter)
+    else:reserved.add(page_parameter)
+    if reserved.intersection(base_query):
+        return {"error":"Pass pagination values through the dedicated arguments, not query.","complete":False}
+    validation_query={**base_query,page_size_parameter:page_size}
+    if not cursor_mode:validation_query[page_parameter]=start_page
     try:
-        _validate_inputs(found,{**base_query,page_parameter:start_page,page_size_parameter:page_size},None,path_params)
+        _validate_inputs(found,validation_query,None,path_params)
     except ValueError as exc:
         return {"error":str(exc),"complete":False}
-    if page_parameter in base_query or page_size_parameter in base_query:
-        return {"error":"Pass pagination values through the dedicated arguments, not query.","complete":False}
-    items=[];pages=0;finished=False
+    items=[];pages=0;finished=False;cursor=None
     try:
         for offset in range(max_pages):
-            page_query={**base_query,page_parameter:start_page+offset,page_size_parameter:page_size}
+            page_query={**base_query,page_size_parameter:page_size}
+            if cursor_mode:
+                if cursor is not None:page_query[cursor_parameter]=cursor
+            else:
+                page_query[page_parameter]=start_page+offset
             payload=await _client().request("GET",resolved_path,params=page_query)
             current=payload
             if result_path:
@@ -334,6 +365,13 @@ async def execute_paginated_endpoint(endpoint:str,path_params:dict[str,Any]|None
             pages+=1;items.extend(current)
             if len(current)<page_size:
                 finished=True;break
+            if cursor_mode:
+                last=current[-1]
+                next_cursor=last.get(cursor_field) if isinstance(last,dict) else None
+                if next_cursor is None or isinstance(next_cursor,(dict,list)) or next_cursor==cursor:
+                    return {"error":"The response did not provide a new valid cursor; pagination stopped to avoid duplicates.",
+                            "pages_fetched":pages,"items_fetched":len(items),"complete":False}
+                cursor=next_cursor
     except NinjaAuthError as exc:
         return {"error":f"Authentication failed: {exc}","pages_fetched":pages,
                 "items_fetched":len(items),"complete":False}
@@ -345,7 +383,9 @@ async def execute_paginated_endpoint(endpoint:str,path_params:dict[str,Any]|None
             "elapsed_ms":round((asyncio.get_running_loop().time()-pagination_started)*1000,1),
             "complete":finished and not truncated,"truncated":truncated,
             "max_pages_reached":not finished,"data":data,
+            "pagination_mode":"cursor" if cursor_mode else "page",
             "note":"If complete=false, increase max_pages or narrow the query."}
+
 
 async def _shutdown()->None:
     global _CLIENT
