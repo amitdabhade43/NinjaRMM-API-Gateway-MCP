@@ -311,7 +311,10 @@ async def execute_paginated_endpoint(endpoint:str,path_params:dict[str,Any]|None
         cursor_schema=(declared[cursor_parameter].get("schema") or {}).get("type")
         item_schema=None
         for response in (found.responses or {}).values():
-            for media in (response.get("content") or {}).values() if isinstance(response,dict) else []:
+            if not isinstance(response,dict):
+                continue
+            content=response.get("content") or {}
+            for media in content.values():
                 schema=media.get("schema") if isinstance(media,dict) else None
                 if isinstance(schema,dict) and schema.get("type")=="array" and isinstance(schema.get("items"),dict):
                     item_schema=schema["items"]
