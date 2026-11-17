@@ -223,9 +223,19 @@ async def discover_endpoints(intent:str,category:str|None=None,method:str|None=N
             log.warning("Local semantic ranking unavailable: %s",exc)
             ranked={"mode":"fuzzy_fallback","selected":[e.key for e in candidates[:5]],
                     "warning":f"Semantic ranking unavailable: {type(exc).__name__}"}
-    return {"candidate_count":len(candidates),"semantic":ranked,
-            "elapsed_ms":round((asyncio.get_running_loop().time()-discovery_started)*1000,1),
-            "candidates":[e.to_summary() for e in candidates]}
+    result = {"candidate_count":len(candidates),"semantic":ranked,
+              "elapsed_ms":round((asyncio.get_running_loop().time()-discovery_started)*1000,1),
+              "candidates":[e.to_summary() for e in candidates]}
+    # For a clear simple GET, include its already-loaded OpenAPI schema in the
+    # discovery response. The agent can validate pagination and execute without
+    # spending another MCP round trip on inspect_endpoint.
+    selected = ranked.get("selected") if isinstance(ranked, dict) else None
+    if ranked.get("mode") == "fuzzy_fast_path" and isinstance(selected, list) and selected:
+        first = selected[0]
+        selected_key = first.get("endpoint") if isinstance(first, dict) else first
+        if selected_key == candidates[0].key and candidates[0].method == "GET":
+            result["selected_details"] = candidates[0].to_detail()
+    return result
 
 @mcp.tool()
 async def inspect_endpoint(endpoint:str)->dict[str,Any]:
