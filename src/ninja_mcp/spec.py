@@ -106,7 +106,7 @@ class Spec:
                         str(operation.get("operationId") or ""),
                         str(operation.get("summary") or ""),
                     )).casefold()
-                    if re.search(r"(?:^|[/_\\-\\s])delete(?:$|[/_\\-\\s])|decommission", identity):
+                    if re.search(r"\\bdelete\\b|decommission", identity):
                         continue
                 tags = operation.get("tags") or []
                 params = list(path_parameters) + list(operation.get("parameters") or [])
