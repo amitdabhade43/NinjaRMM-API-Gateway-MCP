@@ -13,6 +13,7 @@ from urllib.parse import parse_qsl, quote, unquote, urlsplit
 
 from mcp.server.fastmcp import FastMCP
 from jsonschema import Draft202012Validator, ValidationError
+from rapidfuzz import fuzz
 from .approval import ApprovalError, verify_approval
 from .client import NinjaAPIError, NinjaAuthError, NinjaClient
 from .search import score_endpoint, search
@@ -282,16 +283,46 @@ async def execute_raw_request(request:str,body:Any=None,approval_token:str|None=
                            body=body,approval_token=approval_token)
 
 
+def _record_search_blob(value: Any) -> str:
+    """Flatten scalar record values for resource-agnostic fuzzy matching."""
+    parts: list[str] = []
+    def visit(item: Any) -> None:
+        if isinstance(item, dict):
+            for child in item.values():
+                visit(child)
+        elif isinstance(item, (list, tuple)):
+            for child in item:
+                visit(child)
+        elif isinstance(item, str) and item.strip():
+            parts.append(item.strip())
+    visit(value)
+    return " ".join(parts)
+
+
+def _fuzzy_filter_records(records: list[Any], search_text: str, threshold: int) -> list[Any]:
+    """Match records across all scalar fields without resource-specific field maps."""
+    needle = " ".join(search_text.casefold().split())
+    matched = []
+    for record in records:
+        haystack = _record_search_blob(record)
+        if haystack and fuzz.token_set_ratio(needle, haystack.casefold()) >= threshold:
+            matched.append(record)
+    return matched
+
+
 @mcp.tool()
 async def execute_paginated_endpoint(endpoint:str,path_params:dict[str,Any]|None=None,query:dict[str,Any]|None=None,
                                      page_parameter:str="page",page_size_parameter:str="pageSize",
                                      page_size:int=100,start_page:int=1,max_pages:int=10,
                                      result_path:str|None=None,cursor_parameter:str|None=None,
-                                     cursor_field:str|None=None)->dict[str,Any]:
+                                     cursor_field:str|None=None,search_text:str|None=None,
+                                     search_threshold:int=80)->dict[str,Any]:
     """Fetch GET pages using only pagination parameters and cursor fields declared by OpenAPI.
 
     Use page_parameter for numbered pages, or cursor_parameter + cursor_field for
     documented last-record cursors such as NinjaOne's after=lastNodeId.
+    Optional search_text applies generic fuzzy matching across every scalar field
+    of each fetched record. All pages are scanned before matches are returned.
     """
     pagination_started=asyncio.get_running_loop().time()
     found=_spec().get(endpoint)
@@ -301,6 +332,10 @@ async def execute_paginated_endpoint(endpoint:str,path_params:dict[str,Any]|None
     except ValueError as exc:return {"error":str(exc),"complete":False}
     if not (1<=page_size<=1000 and 1<=max_pages<=200 and start_page>=0):
         return {"error":"page_size must be 1-1000, max_pages 1-200, and start_page non-negative.","complete":False}
+    if not (0 <= search_threshold <= 100):
+        return {"error":"search_threshold must be between 0 and 100.","complete":False}
+    if search_text is not None and (not isinstance(search_text, str) or not search_text.strip() or len(search_text) > 256):
+        return {"error":"search_text must contain 1-256 non-whitespace characters.","complete":False}
     declared={p.get("name"):p for p in found.parameters if isinstance(p,dict) and p.get("in")=="query"}
     if page_size_parameter not in declared:
         return {"error":"The page-size parameter is not declared by this endpoint.","complete":False}
@@ -381,8 +416,14 @@ async def execute_paginated_endpoint(endpoint:str,path_params:dict[str,Any]|None
     except NinjaAPIError as exc:
         return {"error":str(exc),"status":exc.status,"body":exc.body,
                 "pages_fetched":pages,"items_fetched":len(items),"complete":False}
+    records_scanned=len(items)
+    if search_text:
+        items=_fuzzy_filter_records(items,search_text,search_threshold)
+    matches_found=len(items) if search_text else None
     data,truncated=truncate(items)
     return {"endpoint":endpoint,"pages_fetched":pages,"items_fetched":len(items),
+            "records_scanned":records_scanned,"matches_found":matches_found,
+            "search_text":search_text,"search_threshold":search_threshold if search_text else None,
             "elapsed_ms":round((asyncio.get_running_loop().time()-pagination_started)*1000,1),
             "complete":finished and not truncated,"truncated":truncated,
             "max_pages_reached":not finished,"data":data,
