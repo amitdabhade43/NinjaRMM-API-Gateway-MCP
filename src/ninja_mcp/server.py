@@ -299,8 +299,8 @@ async def execute_paginated_endpoint(endpoint:str,path_params:dict[str,Any]|None
     if found.method!="GET":return {"error":"Automatic pagination is GET-only.","complete":False}
     try:resolved_path=_interpolate_path(found.path,path_params)
     except ValueError as exc:return {"error":str(exc),"complete":False}
-    if not (1<=page_size<=200 and 1<=max_pages<=50 and start_page>=0):
-        return {"error":"page_size must be 1-200, max_pages 1-50, and start_page non-negative.","complete":False}
+    if not (1<=page_size<=1000 and 1<=max_pages<=200 and start_page>=0):
+        return {"error":"page_size must be 1-1000, max_pages 1-200, and start_page non-negative.","complete":False}
     declared={p.get("name"):p for p in found.parameters if isinstance(p,dict) and p.get("in")=="query"}
     if page_size_parameter not in declared:
         return {"error":"The page-size parameter is not declared by this endpoint.","complete":False}
