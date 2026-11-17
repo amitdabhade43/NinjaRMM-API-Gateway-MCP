@@ -1,6 +1,7 @@
 """OpenAPI loader with local $ref resolution and endpoint metadata."""
 from __future__ import annotations
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -95,6 +96,18 @@ class Spec:
                 if method.lower() not in HTTP_METHODS or not isinstance(raw_operation, dict):
                     continue
                 operation = resolve(raw_operation)
+                # The vendor OpenAPI describes some destructive operations as
+                # POST rather than HTTP DELETE. Keep those unavailable as well:
+                # approval is not a substitute for the product's explicit
+                # policy that delete/decommission actions are never executable.
+                if method.lower() != "get":
+                    identity = " ".join((
+                        path,
+                        str(operation.get("operationId") or ""),
+                        str(operation.get("summary") or ""),
+                    )).casefold()
+                    if re.search(r"(?:^|[/_\\-\\s])delete(?:$|[/_\\-\\s])|decommission", identity):
+                        continue
                 tags = operation.get("tags") or []
                 params = list(path_parameters) + list(operation.get("parameters") or [])
                 # Merge path-level and operation-level parameter overrides by (name, in).
